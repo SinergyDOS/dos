@@ -916,7 +916,20 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('scroll', hideHelpPopover, true);
 
-function uid() { return 'id'+Math.random().toString(36).substr(2,9); }
+function uid() {
+  // Gera UUID v4 real, compatível com as colunas uuid do Supabase.
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch (e) {}
+  // Fallback: monta um UUID v4 válido manualmente (ambientes sem crypto.randomUUID)
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
 function fmt(d) { if(!d)return'—'; return new Date(d+'T00:00:00').toLocaleDateString('pt-BR'); }
 function daysLeft(d) {
   if (!d) return null;
