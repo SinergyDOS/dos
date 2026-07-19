@@ -666,6 +666,75 @@ async function carregarProjetosDoSupabase() {
   }
 }
 
+// ==================== FASE 3 — ESCRITA DE PROJETOS (Supabase) ====================
+// Converte um projeto do app em linha da tabela `projects` (sem tasks/risks).
+function _projetoParaRow(p) {
+  return {
+    id: p.id,
+    nome: p.nome,
+    cliente: p.cliente || '',
+    modulos: Array.isArray(p.modulos) ? p.modulos : [],
+    itens_customizados: p.itensCustomizados || '',
+    data_inicio: p.dataInicio || null,
+    go_live: p.goLive || null,
+    consultor: p.consultor || '',
+    analista: p.analista || '',
+    template_id: p.templateId || null,
+    macro_activities: Array.isArray(p.macroActivities) ? p.macroActivities : [],
+    macro_mappings: Array.isArray(p.macroMappings) ? p.macroMappings : [],
+    is_demo: !!p._demo
+  };
+}
+// Converte uma tarefa do app em linha da tabela `tasks`.
+function _tarefaParaRow(t, projectId, ordem) {
+  return {
+    id: t.id,
+    project_id: projectId,
+    tarefa: t.tarefa || '',
+    fase: t.fase || null,
+    tema: t.tema || null,
+    responsavel: t.responsavel || null,
+    esforco: t.esforco || null,
+    status: t.status || 'pendente',
+    prazo: t.prazo || null,
+    prazo_origem: t.prazoOrigem || null,
+    prazo_manual: !!t._prazoManual,
+    help: t.help || null,
+    comentario: t.comentario || null,
+    template_task_id: t.templateTaskId || null,
+    macro_activity_id: t.macroActivityId || null,
+    ordem: (ordem !== undefined ? ordem : (t._ordem ?? null))
+  };
+}
+
+// Insere um projeto NOVO e todas as suas tarefas no banco. Retorna {ok, error}.
+async function inserirProjetoSupabase(projeto) {
+  if (!sbClient) return { ok:false, error:'Sem conexão com o servidor.' };
+  // 1) insere o projeto
+  const { error: pErr } = await sbClient.from('projects').insert(_projetoParaRow(projeto));
+  if (pErr) return { ok:false, error: pErr.message };
+  // 2) insere as tarefas (em lote). Se falhar, desfaz o projeto para não deixar órfão.
+  const rows = (projeto.tasks || []).map((t, i) => _tarefaParaRow(t, projeto.id, i));
+  if (rows.length) {
+    const { error: tErr } = await sbClient.from('tasks').insert(rows);
+    if (tErr) {
+      await sbClient.from('projects').delete().eq('id', projeto.id); // rollback simples
+      return { ok:false, error: tErr.message };
+    }
+  }
+  return { ok:true };
+}
+
+// Atualiza apenas os campos cadastrais de um projeto existente. Retorna {ok, error}.
+async function atualizarProjetoSupabase(projeto) {
+  if (!sbClient) return { ok:false, error:'Sem conexão com o servidor.' };
+  const row = _projetoParaRow(projeto);
+  delete row.id; // não se atualiza a PK
+  const { error } = await sbClient.from('projects').update(row).eq('id', projeto.id);
+  if (error) return { ok:false, error: error.message };
+  return { ok:true };
+}
+
 function isGestor() { return state.currentUser?.tipo === 'gestor'; }
 function isAnalista() { return state.currentUser?.tipo === 'analista'; }
 function isConsultor() { return state.currentUser?.tipo === 'consultor'; }
@@ -2077,7 +2146,7 @@ function renderProjectForm(editId = null) {
   </div>
   <div class="modal-footer">
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="salvarProjeto(${p ? `'${p.id}'` : ''})"><i class="ti ti-check"></i> ${btnLabel}</button>
+    <button class="btn btn-primary" id="pBtnSalvar" onclick="salvarProjeto(${p ? `'${p.id}'` : ''})"><i class="ti ti-check"></i> ${btnLabel}</button>
   </div>`);
 
   document.getElementById('pConsultor').onchange = function(){
@@ -2127,7 +2196,7 @@ function limparErroCampo(fid) {
   if (msg) msg.style.display = 'none';
 }
 
-function salvarProjeto(editId) {
+async function salvarProjeto(editId) {
   try {
     const el = id => document.getElementById(id);
     if (!el('pNome') || !el('pCliente')) {
@@ -2186,19 +2255,30 @@ function salvarProjeto(editId) {
 
     if (!Array.isArray(state.projetos)) state.projetos = [];
 
+    // ── Estado "salvando" no botão (Opção 1: salvar e confirmar) ──
+    const btnSalvar = el('pBtnSalvar');
+    const btnLabelOrig = btnSalvar ? btnSalvar.innerHTML : '';
+    if (btnSalvar) { btnSalvar.disabled = true; btnSalvar.innerHTML = '<i class="ti ti-loader-2"></i> Salvando...'; }
+    const reativarBotao = () => { if (btnSalvar) { btnSalvar.disabled = false; btnSalvar.innerHTML = btnLabelOrig; } };
+
     let projectId = editId;
     let contexto = 'lista';
+
     if (editId) {
       const p = state.projetos.find(x=>x.id===editId);
-      if (p) {
-        // Atualização segura: só campos cadastrais, preserva tudo o mais (tasks, cronograma, etc.)
-        Object.assign(p, {
-          nome, cliente, modulos, itensCustomizados,
-          dataInicio, goLive, consultor, analista,
-          atualizadoEm: new Date().toISOString()
-        });
+      if (!p) { reativarBotao(); alert('Projeto não encontrado.'); return; }
+      // Monta a versão atualizada (sem tocar em tasks/cronograma)
+      const atualizado = { ...p, nome, cliente, modulos, itensCustomizados, dataInicio, goLive, consultor, analista };
+      // Grava no banco PRIMEIRO; só reflete na tela se confirmar.
+      const res = await atualizarProjetoSupabase(atualizado);
+      if (!res.ok) {
+        reativarBotao();
+        const alertBox = el('pFormAlert'), alertMsg = el('pFormAlertMsg');
+        if (alertBox && alertMsg) { alertMsg.textContent = 'Não foi possível salvar: ' + res.error; alertBox.style.display = 'flex'; }
+        else alert('Não foi possível salvar: ' + res.error);
+        return;
       }
-      // Se o modal foi aberto de dentro do projeto, permanece nele
+      Object.assign(p, { nome, cliente, modulos, itensCustomizados, dataInicio, goLive, consultor, analista, atualizadoEm: new Date().toISOString() });
       contexto = (state.currentProjetoId === editId && state.currentPage === 'projeto-detalhe') ? 'detalhe' : 'lista';
     } else {
       const tplId = el('pTemplate')?.value || '';
@@ -2208,17 +2288,30 @@ function salvarProjeto(editId) {
         : [];
       const novo = {
         id:uid(), nome, cliente, modulos, itensCustomizados, dataInicio, goLive,
-        consultor, analista, tasks, templateId: tplId || null, criadoEm: new Date().toISOString()
+        consultor, analista, tasks, templateId: tplId || null,
+        macroActivities: [], macroMappings: [], risks: [], criadoEm: new Date().toISOString()
       };
+      // Grava projeto + tarefas no banco PRIMEIRO.
+      const res = await inserirProjetoSupabase(novo);
+      if (!res.ok) {
+        reativarBotao();
+        const alertBox = el('pFormAlert'), alertMsg = el('pFormAlertMsg');
+        if (alertBox && alertMsg) { alertMsg.textContent = 'Não foi possível criar o projeto: ' + res.error; alertBox.style.display = 'flex'; }
+        else alert('Não foi possível criar o projeto: ' + res.error);
+        return;
+      }
       state.projetos.push(novo);
       projectId = novo.id;
     }
-    saveState();
+
+    reativarBotao();
     closeModal();
     refreshProjectViewAfterSave(projectId, contexto);
     notificar(editId ? 'Projeto atualizado com sucesso.' : 'Projeto criado com sucesso.', 'sucesso');
   } catch (err) {
     console.error('Erro ao salvar projeto:', err);
+    const btnSalvar = document.getElementById('pBtnSalvar');
+    if (btnSalvar) { btnSalvar.disabled = false; btnSalvar.innerHTML = '<i class="ti ti-check"></i> Salvar'; }
     alert('Não foi possível salvar o projeto: ' + err.message);
   }
 }
