@@ -322,9 +322,14 @@ function loadState() {
       delete parsed.mtExpandFase;
       delete parsed._mtInit;
       delete parsed.projFaseExpand;
+      // Fase 3: os PROJETOS agora vivem no Supabase. Ignoramos qualquer projeto
+      // que tenha ficado no localStorage de versões anteriores — a fonte é o banco.
+      delete parsed.projetos;
       Object.assign(state, parsed);
     }
   } catch(e) {}
+  // Projetos começam vazios; carregarProjetosDoSupabase() preenche após o login.
+  state.projetos = [];
 
   // Usuários padrão se não houver nenhum
   if (!state.users || state.users.length === 0) {
@@ -552,6 +557,113 @@ function enterApp() {
   document.getElementById('sb-role').textContent = state.currentUser.role || (state.currentUser.tipo || '');
   renderSidebar();
   nav('dashboard');
+  // Fase 3 — leitura: carrega os projetos do Supabase (assíncrono).
+  carregarProjetosDoSupabase();
+}
+
+// ==================== FASE 3 — LEITURA (Supabase) ====================
+// Converte uma linha da tabela `tasks` no formato de tarefa usado pelo app.
+function _mapTaskRow(r) {
+  return {
+    id: r.id,
+    tarefa: r.tarefa,
+    fase: r.fase,
+    tema: r.tema,
+    responsavel: r.responsavel,
+    esforco: r.esforco,
+    status: r.status || 'pendente',
+    prazo: r.prazo,
+    prazoOrigem: r.prazo_origem,
+    _prazoManual: !!r.prazo_manual,
+    help: r.help || '',
+    comentario: r.comentario || '',
+    templateTaskId: r.template_task_id,
+    macroActivityId: r.macro_activity_id,
+    _ordem: r.ordem
+  };
+}
+// Converte uma linha da tabela `risks` no formato de risco usado pelo app.
+function _mapRiskRow(r) {
+  return {
+    id: r.id,
+    title: r.title,
+    description: r.description || '',
+    category: r.category || 'Outro',
+    probability: r.probability || 'media',
+    impact: r.impact || 'medio',
+    status: r.status || 'aberto',
+    goLiveBlocker: !!r.go_live_blocker,
+    owner: r.owner || '',
+    mitigationPlan: r.mitigation_plan || '',
+    dueDate: r.due_date,
+    identifiedAt: r.identified_at,
+    updatedAt: r.updated_at,
+    closedAt: r.closed_at,
+    createdBy: r.created_by || ''
+  };
+}
+// Converte uma linha da tabela `projects` (com suas tarefas e riscos) no projeto do app.
+function _mapProjectRow(p, tasksByProject, risksByProject) {
+  const tasks = (tasksByProject[p.id] || [])
+    .sort((a, b) => (a._ordem ?? 0) - (b._ordem ?? 0));
+  return {
+    id: p.id,
+    nome: p.nome,
+    cliente: p.cliente || '—',
+    modulos: Array.isArray(p.modulos) ? p.modulos : [],
+    itensCustomizados: p.itens_customizados || '',
+    dataInicio: p.data_inicio || '',
+    goLive: p.go_live || '',
+    consultor: p.consultor || '',
+    analista: p.analista || '',
+    tasks: tasks,
+    templateId: p.template_id || null,
+    macroActivities: Array.isArray(p.macro_activities) ? p.macro_activities : [],
+    macroMappings: Array.isArray(p.macro_mappings) ? p.macro_mappings : [],
+    risks: risksByProject[p.id] || [],
+    criadoEm: p.created_at,
+    _demo: !!p.is_demo
+  };
+}
+
+let _projetosCarregando = false;
+// Busca projetos + tarefas + riscos do Supabase e preenche state.projetos.
+async function carregarProjetosDoSupabase() {
+  if (!sbClient) return;
+  _projetosCarregando = true;
+  try {
+    // O RLS já limita o que cada usuário enxerga; não precisamos filtrar aqui.
+    const [projRes, taskRes, riskRes] = await Promise.all([
+      sbClient.from('projects').select('*'),
+      sbClient.from('tasks').select('*'),
+      sbClient.from('risks').select('*')
+    ]);
+    if (projRes.error || taskRes.error || riskRes.error) {
+      console.error('Erro ao carregar do Supabase:', projRes.error || taskRes.error || riskRes.error);
+      _projetosCarregando = false;
+      notificar('Não foi possível carregar os projetos do servidor. Tente recarregar a página.', 'erro');
+      return;
+    }
+    // Agrupa tarefas e riscos por projeto
+    const tasksByProject = {};
+    (taskRes.data || []).forEach(r => {
+      (tasksByProject[r.project_id] = tasksByProject[r.project_id] || []).push(_mapTaskRow(r));
+    });
+    const risksByProject = {};
+    (riskRes.data || []).forEach(r => {
+      (risksByProject[r.project_id] = risksByProject[r.project_id] || []).push(_mapRiskRow(r));
+    });
+    state.projetos = (projRes.data || []).map(p => _mapProjectRow(p, tasksByProject, risksByProject));
+    // Normaliza módulos (mesma regra do loadState local), idempotente
+    state.projetos.forEach(p => { try { normalizeProjectModules(p); } catch(e){} });
+    _projetosCarregando = false;
+    // Re-renderiza a tela atual com os dados do banco
+    if (state.currentPage) nav(state.currentPage); else nav('dashboard');
+  } catch (e) {
+    console.error(e);
+    _projetosCarregando = false;
+    notificar('Erro de conexão ao carregar projetos.', 'erro');
+  }
 }
 
 function isGestor() { return state.currentUser?.tipo === 'gestor'; }
