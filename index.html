@@ -735,6 +735,71 @@ async function atualizarProjetoSupabase(projeto) {
   return { ok:true };
 }
 
+// ── ESCRITA DE TAREFAS (otimista) ──
+// Grava a tarefa no banco em segundo plano; a UI já foi atualizada antes de chamar.
+// Se falhar, avisa o usuário (sem travar a interface).
+function persistirTarefa(pId, task) {
+  if (!sbClient || !task) return;
+  const row = _tarefaParaRow(task, pId);
+  delete row.id;
+  sbClient.from('tasks').update(row).eq('id', task.id).then(({ error }) => {
+    if (error) {
+      console.error('Falha ao salvar tarefa:', error);
+      notificar('Não foi possível salvar uma alteração de tarefa no servidor. Recarregue a página para conferir.', 'erro');
+    }
+  }, err => {
+    console.error('Falha ao salvar tarefa (conexão):', err);
+    notificar('Falha de conexão ao salvar uma tarefa. Recarregue a página para conferir.', 'erro');
+  });
+}
+// Atalho: encontra a tarefa no state e persiste.
+function persistirTarefaById(pId, tId) {
+  const p = state.projetos.find(x => x.id === pId);
+  const t = p?.tasks?.find(x => x.id === tId);
+  if (t) persistirTarefa(pId, t);
+}
+
+// ── ESCRITA DE RISCOS (confirmar) ──
+function _riscoParaRow(r, projectId) {
+  return {
+    id: r.id,
+    project_id: projectId,
+    title: r.title || '',
+    description: r.description || '',
+    category: r.category || 'Outro',
+    probability: r.probability || 'media',
+    impact: r.impact || 'medio',
+    status: r.status || 'aberto',
+    go_live_blocker: !!r.goLiveBlocker,
+    owner: r.owner || '',
+    mitigation_plan: r.mitigationPlan || '',
+    due_date: r.dueDate || null,
+    identified_at: r.identifiedAt || new Date().toISOString(),
+    closed_at: r.closedAt || null,
+    created_by: r.createdBy || ''
+  };
+}
+async function inserirRiscoSupabase(risco, projectId) {
+  if (!sbClient) return { ok:false, error:'Sem conexão com o servidor.' };
+  const { error } = await sbClient.from('risks').insert(_riscoParaRow(risco, projectId));
+  if (error) return { ok:false, error: error.message };
+  return { ok:true };
+}
+async function atualizarRiscoSupabase(risco, projectId) {
+  if (!sbClient) return { ok:false, error:'Sem conexão com o servidor.' };
+  const row = _riscoParaRow(risco, projectId);
+  delete row.id;
+  const { error } = await sbClient.from('risks').update(row).eq('id', risco.id);
+  if (error) return { ok:false, error: error.message };
+  return { ok:true };
+}
+async function excluirRiscoSupabase(riskId) {
+  if (!sbClient) return { ok:false, error:'Sem conexão com o servidor.' };
+  const { error } = await sbClient.from('risks').delete().eq('id', riskId);
+  if (error) return { ok:false, error: error.message };
+  return { ok:true };
+}
+
 function isGestor() { return state.currentUser?.tipo === 'gestor'; }
 function isAnalista() { return state.currentUser?.tipo === 'analista'; }
 function isConsultor() { return state.currentUser?.tipo === 'consultor'; }
@@ -1825,7 +1890,7 @@ function renderRiskForm(projectId, riskId) {
   </div>
   <div class="modal-footer">
     <button class="btn btn-secondary" onclick="closeModal()">${somenteLeitura?'Fechar':'Cancelar'}</button>
-    ${!somenteLeitura?`<button class="btn btn-primary" onclick="salvarRisco('${projectId}'${riskId?`,'${riskId}'`:''})"><i class="ti ti-check"></i> ${r?'Salvar alterações':'Criar risco'}</button>`:''}
+    ${!somenteLeitura?`<button class="btn btn-primary" id="rBtnSalvar" onclick="salvarRisco('${projectId}'${riskId?`,'${riskId}'`:''})"><i class="ti ti-check"></i> ${r?'Salvar alterações':'Criar risco'}</button>`:''}
   </div>`, true);
 
   if (!somenteLeitura) {
@@ -1835,7 +1900,7 @@ function renderRiskForm(projectId, riskId) {
   }
 }
 
-function salvarRisco(projectId, riskId = null) {
+async function salvarRisco(projectId, riskId = null) {
   try {
     const p = state.projetos.find(x => x.id === projectId);
     if (!p) return;
@@ -1855,34 +1920,57 @@ function salvarRisco(projectId, riskId = null) {
     const agora = new Date().toISOString();
     if (!Array.isArray(p.risks)) p.risks = [];
 
+    // Monta o objeto do risco (novo ou editado) sem ainda mexer no state.
+    let riscoObj, ehNovo = false, riscoAntigo = null;
     if (riskId) {
       const r = p.risks.find(x => x.id === riskId);
-      if (r) {
-        const estavaFechado = (r.status === 'encerrado');
-        r.title = el('rTitle').value.trim();
-        r.description = el('rDesc').value.trim();
-        r.category = el('rCategory').value;
-        r.probability = el('rProbability').value;
-        r.impact = el('rImpact').value;
-        r.status = status;
-        r.owner = owner;
-        r.mitigationPlan = (el('rMitigation')?.value || '').trim();
-        r.dueDate = el('rDueDate')?.value || null;
-        r.goLiveBlocker = !!el('rBlocker')?.checked;
-        r.updatedAt = agora;
-        if (status === 'encerrado') r.closedAt = r.closedAt || agora;
-        else r.closedAt = null; // reaberto limpa closedAt
-      }
+      if (!r) return;
+      riscoAntigo = { ...r };
+      riscoObj = {
+        ...r,
+        title: el('rTitle').value.trim(),
+        description: el('rDesc').value.trim(),
+        category: el('rCategory').value,
+        probability: el('rProbability').value,
+        impact: el('rImpact').value,
+        status,
+        owner,
+        mitigationPlan: (el('rMitigation')?.value || '').trim(),
+        dueDate: el('rDueDate')?.value || null,
+        goLiveBlocker: !!el('rBlocker')?.checked,
+        updatedAt: agora,
+        closedAt: status === 'encerrado' ? (r.closedAt || agora) : null
+      };
     } else {
-      p.risks.push({
+      ehNovo = true;
+      riscoObj = {
         id: uid(), title: el('rTitle').value.trim(), description: el('rDesc').value.trim(),
         category: el('rCategory').value, probability: el('rProbability').value, impact: el('rImpact').value,
         status, goLiveBlocker: !!el('rBlocker')?.checked, owner,
         mitigationPlan: (el('rMitigation')?.value || '').trim(), dueDate: el('rDueDate')?.value || null,
         identifiedAt: agora, updatedAt: agora, closedAt: status === 'encerrado' ? agora : null,
         createdBy: state.currentUser?.name || ''
-      });
+      };
     }
+
+    // Botão em estado "salvando" (Opção 1: confirmar antes de refletir)
+    const btn = el('rBtnSalvar');
+    const lblOrig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Salvando...'; }
+
+    const res = ehNovo
+      ? await inserirRiscoSupabase(riscoObj, projectId)
+      : await atualizarRiscoSupabase(riscoObj, projectId);
+    if (!res.ok) {
+      if (btn) { btn.disabled = false; btn.innerHTML = lblOrig; }
+      const ab=el('rFormAlert'), am=el('rFormAlertMsg');
+      if(ab&&am){ am.textContent = 'Não foi possível salvar: ' + res.error; ab.style.display='flex'; }
+      return;
+    }
+
+    // Confirmado no banco → reflete no state
+    if (ehNovo) p.risks.push(riscoObj);
+    else { const idx = p.risks.findIndex(x=>x.id===riskId); if (idx>=0) p.risks[idx] = riscoObj; }
     saveState();
     closeModal();
     if (state.currentPage === 'projeto-detalhe' && state.viewMode === 'riscos') renderProjetoDetail(p);
@@ -1891,18 +1979,28 @@ function salvarRisco(projectId, riskId = null) {
     notificar(riskId ? 'Risco atualizado com sucesso.' : 'Risco criado com sucesso.', 'sucesso');
   } catch (err) {
     console.error('Erro ao salvar risco:', err);
+    const btn = document.getElementById('rBtnSalvar');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> Salvar'; }
     notificar('Erro ao salvar risco: ' + err.message, 'erro');
   }
 }
 
-function updateRiskStatus(projectId, riskId, status) {
+async function updateRiskStatus(projectId, riskId, status) {
   const p = state.projetos.find(x => x.id === projectId);
   const r = p?.risks?.find(x => x.id === riskId);
   if (!r) return;
+  const antigo = { status: r.status, closedAt: r.closedAt, updatedAt: r.updatedAt };
   r.status = status;
   r.updatedAt = new Date().toISOString();
   if (status === 'encerrado') r.closedAt = r.closedAt || new Date().toISOString();
   else if (status === 'aberto' || status === 'monitoramento') r.closedAt = null;
+  const res = await atualizarRiscoSupabase(r, projectId);
+  if (!res.ok) {
+    // reverte
+    r.status = antigo.status; r.closedAt = antigo.closedAt; r.updatedAt = antigo.updatedAt;
+    notificar('Não foi possível atualizar o risco: ' + res.error, 'erro');
+    return;
+  }
   saveState();
   if (state.currentPage === 'projeto-detalhe' && state.viewMode === 'riscos') renderProjetoDetail(p);
   else if (state.currentPage === 'dashboard') renderDashboard();
@@ -1911,10 +2009,12 @@ function updateRiskStatus(projectId, riskId, status) {
   notificar(`Risco ${labels[status]||'atualizado'}.`, 'sucesso');
 }
 
-function deleteRisk(projectId, riskId) {
+async function deleteRisk(projectId, riskId) {
   const p = state.projetos.find(x => x.id === projectId);
   if (!p || !Array.isArray(p.risks)) return;
   if (!confirm('Excluir este risco permanentemente? Esta ação não pode ser desfeita.')) return;
+  const res = await excluirRiscoSupabase(riskId);
+  if (!res.ok) { notificar('Não foi possível excluir o risco: ' + res.error, 'erro'); return; }
   p.risks = p.risks.filter(r => r.id !== riskId);
   saveState();
   if (state.currentPage === 'projeto-detalhe' && state.viewMode === 'riscos') renderProjetoDetail(p);
@@ -4291,6 +4391,7 @@ function toggleTask(pId, tId, checked) {
   if (t) {
     t.status = checked ? 'concluida' : 'pendente';
     saveState();
+    persistirTarefa(pId, t);
     renderSidebar();
     document.getElementById('nav-'+state.currentPage)?.classList.add('active');
   }
@@ -4302,6 +4403,7 @@ function mudarStatus(pId, tId, status) {
   if (t) {
     t.status = status;
     saveState();
+    persistirTarefa(pId, t);
     renderSidebar();
     document.getElementById('nav-'+state.currentPage)?.classList.add('active');
   }
@@ -4384,6 +4486,7 @@ function salvarTarefa(pId, tId) {
   const macroSel = document.getElementById('tMacroActivity');
   if (macroSel) t.macroActivityId = macroSel.value || null;
   saveState();
+  persistirTarefa(pId, t);
   closeModal();
   // Atualiza sidebar badge e recarrega a página de origem
   renderSidebar();
@@ -4776,13 +4879,13 @@ function renderMinhasTarefasHierarquia(tabsHTML) {
 function toggleTaskMT(pId, tId, checked) {
   const p = state.projetos.find(x => x.id === pId);
   const t = p?.tasks?.find(x => x.id === tId);
-  if (t) { t.status = checked ? 'concluida' : 'pendente'; saveState(); renderMinhasTarefas(); renderSidebar(); document.getElementById('nav-minhas-tarefas')?.classList.add('active'); }
+  if (t) { t.status = checked ? 'concluida' : 'pendente'; saveState(); persistirTarefa(pId, t); renderMinhasTarefas(); renderSidebar(); document.getElementById('nav-minhas-tarefas')?.classList.add('active'); }
 }
 
 function mudarStatusMT(pId, tId, status) {
   const p = state.projetos.find(x => x.id === pId);
   const t = p?.tasks?.find(x => x.id === tId);
-  if (t) { t.status = status; saveState(); renderMinhasTarefas(); renderSidebar(); document.getElementById('nav-minhas-tarefas')?.classList.add('active'); }
+  if (t) { t.status = status; saveState(); persistirTarefa(pId, t); renderMinhasTarefas(); renderSidebar(); document.getElementById('nav-minhas-tarefas')?.classList.add('active'); }
 }
 
 // ==================== MINHAS TAREFAS — VISÃO POR VENCIMENTO ====================
@@ -5054,6 +5157,7 @@ function updateTaskStatusFromDueView(pId, tId, status) {
   if (!t) return;
   t.status = status;
   saveState();
+  persistirTarefa(pId, t);
   renderMinhasTarefas();          // preserva state.mtView === 'vencimento' e os filtros
   renderSidebar();
   document.getElementById('nav-minhas-tarefas')?.classList.add('active');
