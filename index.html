@@ -887,11 +887,42 @@ function _mapProjectRow(p, tasksByProject, risksByProject) {
 }
 
 let _projetosCarregando = false;
+// Busca a equipe (app_users) do Supabase e preenche state.users.
+// É essa lista que alimenta os campos de consultor/analista dos projetos.
+async function carregarUsuariosDoSupabase() {
+  if (!sbClient) return;
+  try {
+    const { data, error } = await sbClient.from('app_users').select('*');
+    if (error) {
+      console.error('Erro ao carregar usuários:', error);
+      return;
+    }
+    const paleta = ['#2e6ef7','#7c3aed','#16a34a','#d97706','#dc2626','#0891b2','#c026d3','#65a30d'];
+    const ativos = (data || []).filter(u => u.active !== false);
+    if (!ativos.length) return; // mantém o que já existe se o banco não retornar nada
+    state.users = ativos
+      .map((u, i) => ({
+        id: u.id,
+        name: u.name,
+        role: u.role || '',
+        tipo: (u.tipo || 'consultor').toLowerCase(),
+        color: u.color || paleta[i % paleta.length],
+        initials: u.initials || _iniciaisNome(u.name),
+        email: u.email || ''
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch (e) {
+    console.error('Falha ao carregar usuários:', e);
+  }
+}
+
 // Busca projetos + tarefas + riscos do Supabase e preenche state.projetos.
 async function carregarProjetosDoSupabase() {
   if (!sbClient) return;
   _projetosCarregando = true;
   try {
+    // Carrega a equipe junto — é ela que alimenta os seletores de responsável.
+    await carregarUsuariosDoSupabase();
     // O RLS já limita o que cada usuário enxerga; não precisamos filtrar aqui.
     const [projRes, taskRes, riskRes] = await Promise.all([
       sbClient.from('projects').select('*'),
@@ -6475,8 +6506,7 @@ function showPersonAllocationMatrixDetails(personKey) {
 
 function renderUsuarios() {
   if (!isGestor()) { nav('dashboard'); return; }
-  document.getElementById('topbar-actions').innerHTML = `
-    <button class="btn btn-primary" onclick="showAddUserModal()"><i class="ti ti-user-plus"></i> Novo usuário</button>`;
+  document.getElementById('topbar-actions').innerHTML = '';
 
   const TIPO_BADGE = {
     gestor:    {label:'Gestor de projetos', bg:'#dcfce7', color:'#166534'},
@@ -6484,21 +6514,34 @@ function renderUsuarios() {
     analista:  {label:'Analista',           bg:'#ede9fe', color:'#6d28d9'},
   };
 
-  document.getElementById('page-content').innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px">
+  const aviso = `<div class="card" style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-start;background:#f8fafc">
+      <i class="ti ti-info-circle" style="color:var(--accent);font-size:18px;margin-top:2px"></i>
+      <div style="font-size:12px;color:var(--gray-600);line-height:1.6">
+        Esta é a equipe cadastrada no servidor. O acesso de cada pessoa é criado no painel do Supabase
+        (Authentication &rarr; Users) e liberado na tabela <code>app_users</code>.
+        <strong>O nome aqui deve ser idêntico ao usado nos campos Consultor/Analista dos projetos</strong> —
+        é por ele que o sistema libera o acesso de cada um aos seus projetos.
+      </div>
+    </div>`;
+
+  const lista = (state.users || []).length
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px">
       ${state.users.map(u => {
         const tb = TIPO_BADGE[u.tipo] || {label: u.tipo||'—', bg:'#f1f5f9', color:'#64748b'};
         return `<div class="card" style="display:flex;align-items:center;gap:14px">
           <div style="width:48px;height:48px;border-radius:50%;background:${u.color};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0">${u.initials}</div>
-          <div style="flex:1">
+          <div style="flex:1;min-width:0">
             <div style="font-weight:600;font-size:14px">${u.name}</div>
-            <div style="font-size:12px;color:var(--gray-500);margin-bottom:4px">${u.role}</div>
+            <div style="font-size:12px;color:var(--gray-500);margin-bottom:4px">${u.role || '—'}</div>
+            ${u.email ? `<div style="font-size:11px;color:var(--gray-400);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis">${u.email}</div>` : ''}
             <span class="badge" style="background:${tb.bg};color:${tb.color}">${tb.label}</span>
           </div>
-          <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="removerUsuario('${u.id}')"><i class="ti ti-trash"></i></button>
         </div>`;
       }).join('')}
-    </div>`;
+    </div>`
+    : `<div class="card"><div class="empty"><i class="ti ti-users"></i><p>Nenhum usuário cadastrado no servidor.</p><small>Cadastre a equipe no painel do Supabase para que apareça aqui.</small></div></div>`;
+
+  document.getElementById('page-content').innerHTML = aviso + lista;
 }
 
 function showAddUserModal() {
