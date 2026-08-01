@@ -546,13 +546,61 @@ const DEFAULT_DEPARA_TEMPLATE = [
   {macroKey:"ASSINATURA_DOS_CADERNOS",macroNameLabel:"Assinatura dos cadernos",checklistTaskIds:["ct213","ct214","ct215"]}
 ];
 
+// ── Checklists específicos por escopo (projetos só de Ponto / só de RH) ──
+const DEFAULT_CHECKLIST_TASKS_PONTO = [
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Agendar reunião de levantamento",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Diagnóstico",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Realizar parametrizações",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Testes unitários",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Pré Paralelo",tema:"Ponto",tarefa:"Realizar integrações cadastrais",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Pré Paralelo",tema:"Ponto",tarefa:"Realizar saneamento de cadastros faltantes com o cliente",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Pré Paralelo",tema:"Ponto",tarefa:"Atualizar dados faltantes",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Realizar testes de cálculo conforme acordos coletivos parametrizados",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Realizar testes de marcação",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 4 - Treinamentos",tema:"Ponto",tarefa:"Realizar treinamento RH",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 4 - Treinamentos",tema:"Ponto",tarefa:"Realizar treinamento Gestor",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 5 - Go-Live",tema:"Ponto",tarefa:"Criação e liberação dos usuários (Perfil Funcionário)",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 5 - Go-Live",tema:"Ponto",tarefa:"Criação e Liberação dos Perfis Gestor",responsavel:"Consultor;Analista",esforco:"",help:""}
+];
+const DEFAULT_DEPARA_TEMPLATE_PONTO = [
+  {macroKey:"LEVANTAMENTO",macroNameLabel:"Levantamento",checklistTaskIds:["ct0","ct1"]},
+  {macroKey:"PARAMETRIZACAO_GERAL_PONTO",macroNameLabel:"Parametrização Geral Ponto",checklistTaskIds:["ct2","ct3"]},
+  {macroKey:"ATUALIZACAO_DE_MOVIMENTACOES_CADASTRAIS",macroNameLabel:"Atualização de movimentações cadastrais",checklistTaskIds:["ct4","ct5","ct6"]},
+  {macroKey:"VALIDACAO_GERAL",macroNameLabel:"Validação geral",checklistTaskIds:["ct7","ct8"]},
+  {macroKey:"TREINAMENTOS",macroNameLabel:"Treinamentos",checklistTaskIds:["ct9","ct10"]},
+  {macroKey:"LIBERACAO_DE_USUARIOS",macroNameLabel:"Liberação de usuários",checklistTaskIds:["ct11","ct12"]}
+];
+const DEFAULT_CHECKLIST_TASKS_RH = [
+  {fase:"Fase 1 - Diagnóstico",tema:"RH",tarefa:"Agendar reunião de levantamento",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"RH",tarefa:"Diagnóstico",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"RH",tarefa:"Realizar parametrizações",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"RH",tarefa:"Testes unitários",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Pré Paralelo",tema:"RH",tarefa:"Realizar integrações cadastrais",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Pré Paralelo",tema:"RH",tarefa:"Realizar saneamento de cadastros faltantes com o cliente",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Pré Paralelo",tema:"RH",tarefa:"Atualizar dados faltantes",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"RH",tarefa:"Realizar testes de cálculo conforme acordos coletivos parametrizados",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"RH",tarefa:"Realizar testes de marcação",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 4 - Treinamentos",tema:"RH",tarefa:"Realizar treinamento RH",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 4 - Treinamentos",tema:"RH",tarefa:"Realizar treinamento Gestor",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 5 - Go-Live",tema:"RH",tarefa:"Criação e liberação dos usuários (Perfil Funcionário)",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 5 - Go-Live",tema:"RH",tarefa:"Criação e Liberação dos Perfis Gestor",responsavel:"Consultor;Analista",esforco:"",help:""}
+];
+const DEFAULT_DEPARA_TEMPLATE_RH = [
+  {macroKey:"LEVANTAMENTO",macroNameLabel:"Levantamento",checklistTaskIds:["ct0","ct1"]},
+  {macroKey:"PARAMETRIZACAO_GERAL_MODULO",macroNameLabel:"Parametrização Geral Módulo",checklistTaskIds:["ct2","ct3"]},
+  {macroKey:"ATUALIZACAO_DE_MOVIMENTACOES_CADASTRAIS",macroNameLabel:"Atualização de movimentações cadastrais",checklistTaskIds:["ct4","ct5","ct6"]},
+  {macroKey:"VALIDACAO_GERAL",macroNameLabel:"Validação geral",checklistTaskIds:["ct7","ct8"]},
+  {macroKey:"TREINAMENTOS",macroNameLabel:"Treinamentos",checklistTaskIds:["ct9","ct10"]},
+  {macroKey:"LIBERACAO_DE_USUARIOS",macroNameLabel:"Liberação de usuários",checklistTaskIds:["ct11","ct12"]}
+];
+
 
 // ==================== SUPABASE ====================
 // Conexão com o backend (Fase 2 - login). Os DADOS ainda vêm do localStorage
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-01-portfolio-golive';
+const DOS_BUILD = '2026-08-01-templates-rh';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -625,7 +673,7 @@ function loadState() {
   // ── Template padrão de checklist ──────────────────────────────────────────
   // CHECKLIST_VERSION incrementa quando o checklist padrão muda. Usuários que já
   // têm o portal aberto recebem a versão nova automaticamente, SEM perder projetos.
-  const CHECKLIST_VERSION = 5;
+  const CHECKLIST_VERSION = 6;
   const buildDefaultTemplate = () => ({
     id: 'tpl1',
     nome: 'Checklist Padrão de Implantação',
@@ -635,24 +683,49 @@ function loadState() {
     // DE-PARA padrão: vínculos macroKey → tarefas do checklist (estáveis entre projetos)
     deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE))
   });
+  // Templates de escopo reduzido, para projetos que contratam apenas um módulo.
+  const buildTemplatePonto = () => ({
+    id: 'tpl2',
+    nome: 'Checklist Ponto',
+    descricao: 'Implantação somente do módulo Ponto — 13 atividades, 6 fases',
+    versao: CHECKLIST_VERSION,
+    tasks: DEFAULT_CHECKLIST_TASKS_PONTO.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
+    deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE_PONTO))
+  });
+  const buildTemplateRH = () => ({
+    id: 'tpl3',
+    nome: 'Checklist RH',
+    descricao: 'Implantação somente do módulo RH — 13 atividades, 6 fases',
+    versao: CHECKLIST_VERSION,
+    tasks: DEFAULT_CHECKLIST_TASKS_RH.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
+    deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE_RH))
+  });
+  const CONSTRUTORES_TEMPLATE = [
+    { id:'tpl1', build: buildDefaultTemplate },
+    { id:'tpl2', build: buildTemplatePonto },
+    { id:'tpl3', build: buildTemplateRH }
+  ];
 
   if (!state.checklistTemplates || state.checklistTemplates.length === 0) {
-    // Primeira execução: cria o template padrão
-    state.checklistTemplates = [buildDefaultTemplate()];
+    // Primeira execução: cria os templates padrão
+    state.checklistTemplates = CONSTRUTORES_TEMPLATE.map(c => c.build());
   } else {
-    // Já existe: atualiza o template padrão (tpl1) se a versão estiver defasada.
-    // Projetos já criados NÃO são afetados — mantêm as tarefas que foram copiadas na criação.
-    const idx = state.checklistTemplates.findIndex(t => t.id === 'tpl1');
-    if (idx !== -1) {
-      if ((state.checklistTemplates[idx].versao || 1) < CHECKLIST_VERSION) {
-        // Nesta versão, o checklist foi reformulado (216 tarefas) e o DE-PARA
-        // foi refeito (novas macros). Aplicamos integralmente o novo template padrão.
-        state.checklistTemplates[idx] = buildDefaultTemplate();
+    // Já existem: cria os que faltam e atualiza os defasados.
+    // Projetos já criados NÃO são afetados — mantêm as tarefas copiadas na criação.
+    CONSTRUTORES_TEMPLATE.forEach(c => {
+      const idx = state.checklistTemplates.findIndex(t => t.id === c.id);
+      if (idx === -1) {
+        state.checklistTemplates.push(c.build());
+      } else if ((state.checklistTemplates[idx].versao || 1) < CHECKLIST_VERSION) {
+        state.checklistTemplates[idx] = c.build();
       }
-    } else {
-      // Não há template padrão (usuário removeu) — recria mantendo os demais
-      state.checklistTemplates.unshift(buildDefaultTemplate());
-    }
+    });
+    // Mantém tpl1 no topo da lista
+    state.checklistTemplates.sort((a,b) => {
+      const oa = CONSTRUTORES_TEMPLATE.findIndex(c=>c.id===a.id);
+      const ob = CONSTRUTORES_TEMPLATE.findIndex(c=>c.id===b.id);
+      return (oa===-1?99:oa) - (ob===-1?99:ob);
+    });
   }
   // Sanea templates: garante que todo template tenha deParaTemplate como array
   state.checklistTemplates = (state.checklistTemplates||[]).map(tpl => ({
@@ -1694,7 +1767,7 @@ function getFilteredExecutiveProjects() {
       const alvo = _normTxt([p.nome, p.cliente, p.consultor, p.analista, (p.modulos||[]).join(' '), p.itensCustomizados].filter(Boolean).join(' '));
       if (!alvo.includes(busca)) return false;
     }
-    if (f.module && !(Array.isArray(p.modulos) && p.modulos.includes(f.module))) return false;
+    if (f.module && !projectHasModule(p, f.module)) return false;
     if (f.goLivePeriod && !matchesGoLivePeriod(p, f.goLivePeriod)) return false;
     if (f.currentPhase) {
       const fase = getProjectCurrentPhase(p);
@@ -1763,7 +1836,9 @@ function calculateProjectsByPhase(projects) {
 }
 function calculateProjectsByModule(projects) {
   const cont = {}; PROJECT_MODULE_OPTIONS.forEach(m => cont[m] = 0);
-  projects.forEach(p => (p.modulos || []).forEach(m => { if (cont[m] !== undefined) cont[m]++; }));
+  // Conta cada módulo uma vez por projeto; submódulos não somam separadamente
+  // (um projeto com 5 submódulos de RH conta como 1 em RH).
+  projects.forEach(p => PROJECT_MODULE_OPTIONS.forEach(m => { if (projectHasModule(p, m)) cont[m]++; }));
   return cont;
 }
 function calculateProjectsByStatus(projects) {
@@ -2530,7 +2605,75 @@ function renderProjetos() {
 }
 
 // ==================== MÓDULOS PADRONIZADOS DO PROJETO ====================
-const PROJECT_MODULE_OPTIONS = ["Folha", "GED", "Ponto", "Cargos e Salários", "Orçamento"];
+const PROJECT_MODULE_OPTIONS = ["Folha", "GED", "Ponto", "Cargos e Salários", "Orçamento", "RH"];
+
+// Submódulos por módulo. Armazenados em project.modulos como "RH: <submódulo>".
+// No filtro do dashboard o pai aparece uma única vez e casa com qualquer submódulo.
+const PROJECT_SUBMODULE_OPTIONS = {
+  "RH": [
+    "Recrutamento & Seleção",
+    "Treinamento & Desenvolvimento (T&D)",
+    "Metas",
+    "PDI",
+    "Reconhecimento",
+    "Rede Social",
+    "Admissão Digital",
+    "Avaliação de Desempenho",
+    "Feedback",
+    "Insight",
+    "eNPS",
+    "Pulso e Clima",
+    "Sucessão",
+    "Período de experiência",
+    "DISC",
+    "Quadro de posições",
+    "Entrevista de desligamento",
+    "Pesquisas, Enquetes e comunica Syn",
+    "Integração com fornecedores terceiros"
+  ]
+};
+const SUBMODULE_SEP = ': ';
+
+// "RH: Metas" → {parent:'RH', sub:'Metas'} | "Folha" → null
+// Tolerante a variações de caixa/acento no nome do pai ("rh: pdi" também vale).
+function splitSubmodule(value) {
+  const txt = String(value || '').trim();
+  const i = txt.indexOf(SUBMODULE_SEP);
+  if (i <= 0) return null;
+  const paiBruto = txt.slice(0, i).trim();
+  const sub = txt.slice(i + SUBMODULE_SEP.length).trim();
+  if (!sub) return null;
+  // resolve o nome oficial do pai (aceita 'rh', 'RH', 'Recursos Humanos'...)
+  const paiOficial = Object.keys(PROJECT_SUBMODULE_OPTIONS)
+    .find(k => normalizeModuleText(k) === normalizeModuleText(paiBruto))
+    || identifyStandardProjectModule(paiBruto);
+  if (!paiOficial || !PROJECT_SUBMODULE_OPTIONS[paiOficial]) return null;
+  return { parent: paiOficial, sub };
+}
+// Reconhece um submódulo escrito de forma livre e devolve o rótulo oficial
+function identifySubmodule(parent, value) {
+  const lista = PROJECT_SUBMODULE_OPTIONS[parent] || [];
+  const n = normalizeModuleText(value);
+  return lista.find(opt => normalizeModuleText(opt) === n) || null;
+}
+// Submódulos selecionados de um projeto para um módulo pai
+function getProjectSubmodules(project, parent) {
+  return (Array.isArray(project?.modulos) ? project.modulos : [])
+    .map(splitSubmodule).filter(x => x && x.parent === parent).map(x => x.sub);
+}
+// O projeto tem este módulo? (o pai casa também com qualquer submódulo dele)
+function projectHasModule(project, modulo) {
+  const mods = Array.isArray(project?.modulos) ? project.modulos : [];
+  if (mods.includes(modulo)) return true;
+  if (PROJECT_SUBMODULE_OPTIONS[modulo]) {
+    return mods.some(m => { const s = splitSubmodule(m); return s && s.parent === modulo; });
+  }
+  return false;
+}
+// Mesma regra, para listas de módulos já extraídas (usada na matriz de alocação)
+function moduleListHasModule(lista, modulo) {
+  return projectHasModule({ modulos: lista }, modulo);
+}
 
 // Normaliza texto para comparação (minúsculas, sem acento, espaços colapsados, trim)
 function normalizeModuleText(value) {
@@ -2548,7 +2691,8 @@ function identifyStandardProjectModule(value) {
     'ged': 'GED', 'ged/kit': 'GED', 'kit': 'GED', 'gestao eletronica de documentos': 'GED',
     'ponto': 'Ponto', 'ponto eletronico': 'Ponto', 'controle de ponto': 'Ponto',
     'cargos e salarios': 'Cargos e Salários', 'cargos': 'Cargos e Salários', 'plano de cargos': 'Cargos e Salários',
-    'orcamento': 'Orçamento', 'budget': 'Orçamento'
+    'orcamento': 'Orçamento', 'budget': 'Orçamento',
+    'rh': 'RH', 'recursos humanos': 'RH'
   };
   return MAP[n] || null;
 }
@@ -2572,39 +2716,121 @@ function normalizeProjectModules(project) {
   if (typeof project.itensCustomizados !== 'string') project.itensCustomizados = '';
   const brutos = Array.isArray(project.modulos) ? project.modulos : [];
   const oficiais = [];
+  const subsPorPai = {};
   const naoReconhecidos = [];
   brutos.forEach(m => {
+    // 1) submódulo no formato "Pai: Submódulo"
+    const sp = splitSubmodule(m);
+    if (sp) {
+      const subOficial = identifySubmodule(sp.parent, sp.sub);
+      if (subOficial) {
+        (subsPorPai[sp.parent] = subsPorPai[sp.parent] || []);
+        if (!subsPorPai[sp.parent].includes(subOficial)) subsPorPai[sp.parent].push(subOficial);
+        if (!oficiais.includes(sp.parent)) oficiais.push(sp.parent); // submódulo implica o pai
+        return;
+      }
+    }
+    // 2) módulo padrão
     const oficial = identifyStandardProjectModule(m);
-    if (oficial) { if (!oficiais.includes(oficial)) oficiais.push(oficial); }
-    else { const t = String(m || '').trim(); if (t) naoReconhecidos.push(t); }
+    if (oficial) { if (!oficiais.includes(oficial)) oficiais.push(oficial); return; }
+    // 3) não reconhecido → vira item customizado
+    const t = String(m || '').trim();
+    if (t) naoReconhecidos.push(t);
   });
-  // reordena conforme PROJECT_MODULE_OPTIONS
-  project.modulos = PROJECT_MODULE_OPTIONS.filter(opt => oficiais.includes(opt));
+  // reordena conforme PROJECT_MODULE_OPTIONS, com os submódulos logo após o pai
+  const saida = [];
+  PROJECT_MODULE_OPTIONS.forEach(opt => {
+    if (!oficiais.includes(opt)) return;
+    saida.push(opt);
+    const lista = PROJECT_SUBMODULE_OPTIONS[opt] || [];
+    lista.forEach(sub => {
+      if ((subsPorPai[opt] || []).includes(sub)) saida.push(opt + SUBMODULE_SEP + sub);
+    });
+  });
+  project.modulos = saida;
   if (naoReconhecidos.length) {
     project.itensCustomizados = mergeCustomProjectItems(project.itensCustomizados, naoReconhecidos);
   }
 }
 
-// Gera os checkboxes dos módulos padrão (com os selecionados marcados)
+// Gera os checkboxes dos módulos padrão (com os selecionados marcados).
+// Módulos que têm submódulos ganham um painel que aparece ao marcá-los.
 function renderProjectModuleCheckboxes(selectedModules = []) {
-  const selNorm = new Set((selectedModules || []).map(normalizeModuleText));
+  const sel = selectedModules || [];
+  const selNorm = new Set(sel.map(normalizeModuleText));
+  const temSub = (opt, sub) => sel.some(m => normalizeModuleText(m) === normalizeModuleText(opt + SUBMODULE_SEP + sub));
   return `<div class="project-module-grid">
     ${PROJECT_MODULE_OPTIONS.map((opt, i) => {
       const checked = selNorm.has(normalizeModuleText(opt)) ? 'checked' : '';
+      const subs = PROJECT_SUBMODULE_OPTIONS[opt];
+      const onchange = subs ? ` onchange="toggleSubmodulePanel('${opt}')"` : '';
       return `<label class="project-module-option" for="pmod-${i}">
-        <input type="checkbox" id="pmod-${i}" name="pModulo" value="${opt}" ${checked}>
+        <input type="checkbox" id="pmod-${i}" name="pModulo" value="${opt}" ${checked}${onchange}>
         <span>${opt}</span>
       </label>`;
     }).join('')}
-  </div>`;
+  </div>
+  ${Object.keys(PROJECT_SUBMODULE_OPTIONS).map(pai => {
+    const aberto = selNorm.has(normalizeModuleText(pai));
+    const marcados = (PROJECT_SUBMODULE_OPTIONS[pai] || []).filter(s => temSub(pai, s)).length;
+    return `<div id="submod-panel-${pai}" style="${aberto?'':'display:none;'}margin-top:10px;border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;background:var(--gray-50)">
+      <div style="font-size:12px;font-weight:600;color:var(--gray-600);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+        <span>Submódulos de ${pai}</span>
+        <span style="font-weight:400;color:var(--gray-400);font-size:11px"><span id="submod-count-${pai}">${marcados}</span> selecionado(s)</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 10px">
+        ${(PROJECT_SUBMODULE_OPTIONS[pai]||[]).map((sub, j) => `
+          <label for="psub-${pai}-${j}" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--gray-700);cursor:pointer;padding:2px 0">
+            <input type="checkbox" id="psub-${pai}-${j}" name="pSubmodulo" data-parent="${pai}" value="${pai}${SUBMODULE_SEP}${sub}" ${temSub(pai,sub)?'checked':''} onchange="atualizarContagemSubmodulos('${pai}')">
+            <span>${sub}</span>
+          </label>`).join('')}
+      </div>
+    </div>`;
+  }).join('')}`;
 }
 
-// Lê os checkboxes marcados via atributo value, na ordem de PROJECT_MODULE_OPTIONS
+// Mostra/esconde o painel de submódulos ao marcar/desmarcar o módulo pai
+function toggleSubmodulePanel(pai) {
+  const cb = [...document.querySelectorAll('input[name="pModulo"]')].find(c => c.value === pai);
+  const painel = document.getElementById('submod-panel-' + pai);
+  if (!cb || !painel) return;
+  painel.style.display = cb.checked ? '' : 'none';
+  if (!cb.checked) {
+    // desmarcar o pai limpa os submódulos, para não gravar filho sem pai
+    document.querySelectorAll(`input[name="pSubmodulo"][data-parent="${pai}"]`).forEach(c => { c.checked = false; });
+    atualizarContagemSubmodulos(pai);
+  }
+}
+function atualizarContagemSubmodulos(pai) {
+  const n = document.querySelectorAll(`input[name="pSubmodulo"][data-parent="${pai}"]:checked`).length;
+  const el = document.getElementById('submod-count-' + pai);
+  if (el) el.textContent = n;
+  // marcar um submódulo implica o módulo pai
+  if (n > 0) {
+    const cb = [...document.querySelectorAll('input[name="pModulo"]')].find(c => c.value === pai);
+    if (cb && !cb.checked) { cb.checked = true; const p = document.getElementById('submod-panel-'+pai); if (p) p.style.display=''; }
+  }
+}
+
+// Lê os checkboxes marcados, na ordem de PROJECT_MODULE_OPTIONS, com submódulos após o pai
 function getSelectedProjectModules() {
   const marcados = new Set(
     [...document.querySelectorAll('input[name="pModulo"]:checked')].map(c => c.value)
   );
-  return PROJECT_MODULE_OPTIONS.filter(opt => marcados.has(opt));
+  const subsMarcados = new Set(
+    [...document.querySelectorAll('input[name="pSubmodulo"]:checked')].map(c => c.value)
+  );
+  const saida = [];
+  PROJECT_MODULE_OPTIONS.forEach(opt => {
+    const temSubMarcado = [...subsMarcados].some(v => { const s = splitSubmodule(v); return s && s.parent === opt; });
+    if (!marcados.has(opt) && !temSubMarcado) return;
+    saida.push(opt);
+    (PROJECT_SUBMODULE_OPTIONS[opt] || []).forEach(sub => {
+      const v = opt + SUBMODULE_SEP + sub;
+      if (subsMarcados.has(v)) saida.push(v);
+    });
+  });
+  return saida;
 }
 
 // Marca os checkboxes conforme uma lista de módulos (tolerante a variações)
@@ -2613,9 +2839,19 @@ function setSelectedProjectModules(modules) {
   document.querySelectorAll('input[name="pModulo"]').forEach(c => {
     c.checked = selNorm.has(normalizeModuleText(c.value));
   });
+  document.querySelectorAll('input[name="pSubmodulo"]').forEach(c => {
+    c.checked = selNorm.has(normalizeModuleText(c.value));
+  });
+  Object.keys(PROJECT_SUBMODULE_OPTIONS).forEach(pai => {
+    const painel = document.getElementById('submod-panel-' + pai);
+    const cb = [...document.querySelectorAll('input[name="pModulo"]')].find(c => c.value === pai);
+    if (painel && cb) painel.style.display = cb.checked ? '' : 'none';
+    atualizarContagemSubmodulos(pai);
+  });
 }
 
-// Exibição central dos módulos (chips) — usada em todas as telas
+// Exibição central dos módulos (chips) — usada em todas as telas.
+// Submódulos não viram chips individuais: o pai mostra a contagem e lista no tooltip.
 function renderProjectModules(project, options = {}) {
   const mods = Array.isArray(project.modulos) ? project.modulos : [];
   const custom = (project.itensCustomizados || '').trim();
@@ -2623,7 +2859,13 @@ function renderProjectModules(project, options = {}) {
   if (!mods.length && !custom) {
     return options.hideWhenEmpty ? '' : `<span style="font-size:12px;color:var(--gray-400)">Nenhum módulo informado</span>`;
   }
-  let chips = mods.map(m => `<span class="chip">${m}</span>`).join('');
+  const pais = mods.filter(m => !splitSubmodule(m));
+  let chips = pais.map(m => {
+    const subs = getProjectSubmodules(project, m);
+    if (!subs.length) return `<span class="chip">${m}</span>`;
+    const tip = `${m} — ${subs.length} submódulo(s):&#10;• ${subs.join('&#10;• ')}`;
+    return `<span class="chip" title="${tip}">${m} <span style="opacity:.7">(${subs.length})</span></span>`;
+  }).join('');
   if (custom) {
     if (compact) {
       chips += `<span class="chip" style="background:var(--gray-100);color:var(--gray-600)" title="${custom.replace(/"/g,'&quot;')}"><i class="ti ti-puzzle" style="font-size:11px;vertical-align:-1px"></i> + Customizados</span>`;
@@ -6305,7 +6547,7 @@ function getFilteredAllocationMatrixData() {
   const summaries = people.map(person => {
     // aplica filtros de vínculo/projeto sobre os links da pessoa
     let personLinks = allLinks.filter(l => l.personKey === person.personKey);
-    if (f.module) personLinks = personLinks.filter(l => l.modules.includes(f.module));
+    if (f.module) personLinks = personLinks.filter(l => moduleListHasModule(l.modules, f.module));
     if (f.projectStatus) personLinks = personLinks.filter(l => l.projectStatus.key === f.projectStatus);
     if (f.periodStart || f.periodEnd) {
       const ps = f.periodStart ? parseLocalDate(f.periodStart) : new Date(1900,0,1);
@@ -6523,7 +6765,7 @@ function renderAllocationProjectsView() {
   // aplica filtros compatíveis
   const busca = _normTxt(f.search||'');
   if (busca) projetos = projetos.filter(p => _normTxt(p.nome).includes(busca)||_normTxt(p.cliente||'').includes(busca)||_normTxt(p.consultor||'').includes(busca)||_normTxt(p.analista||'').includes(busca));
-  if (f.module) projetos = projetos.filter(p => Array.isArray(p.modulos)&&p.modulos.includes(f.module));
+  if (f.module) projetos = projetos.filter(p => projectHasModule(p, f.module));
   if (f.projectStatus) projetos = projetos.filter(p => getProjectExecutiveStatus(p).key===f.projectStatus);
 
   if (!projetos.length) {
