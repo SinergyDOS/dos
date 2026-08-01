@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Portal de Implantação</title>
+<title>DOS Sinergy</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.10.0/tabler-icons.min.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" onerror="var s=document.createElement('script');s.src='https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';document.head.appendChild(s);"></script>
@@ -600,7 +600,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-01-templates-rh';
+const DOS_BUILD = '2026-08-01-ajustes-exec';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -673,13 +673,13 @@ function loadState() {
   // ── Template padrão de checklist ──────────────────────────────────────────
   // CHECKLIST_VERSION incrementa quando o checklist padrão muda. Usuários que já
   // têm o portal aberto recebem a versão nova automaticamente, SEM perder projetos.
-  const CHECKLIST_VERSION = 6;
+  const CHECKLIST_VERSION = 7;
   const buildDefaultTemplate = () => ({
     id: 'tpl1',
     nome: 'Checklist Padrão de Implantação',
-    descricao: 'Template completo de implantação — 216 atividades, 6 fases',
+    descricao: 'Template completo de implantação — 217 atividades, 6 fases',
     versao: CHECKLIST_VERSION,
-    tasks: DEFAULT_CHECKLIST_TASKS.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
+    tasks: [...DEFAULT_CHECKLIST_TASKS, GOLIVE_MARKER_TASK].map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
     // DE-PARA padrão: vínculos macroKey → tarefas do checklist (estáveis entre projetos)
     deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE))
   });
@@ -687,17 +687,17 @@ function loadState() {
   const buildTemplatePonto = () => ({
     id: 'tpl2',
     nome: 'Checklist Ponto',
-    descricao: 'Implantação somente do módulo Ponto — 13 atividades, 6 fases',
+    descricao: 'Implantação somente do módulo Ponto — 14 atividades, 6 fases',
     versao: CHECKLIST_VERSION,
-    tasks: DEFAULT_CHECKLIST_TASKS_PONTO.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
+    tasks: [...DEFAULT_CHECKLIST_TASKS_PONTO, GOLIVE_MARKER_TASK].map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
     deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE_PONTO))
   });
   const buildTemplateRH = () => ({
     id: 'tpl3',
     nome: 'Checklist RH',
-    descricao: 'Implantação somente do módulo RH — 13 atividades, 6 fases',
+    descricao: 'Implantação somente do módulo RH — 14 atividades, 6 fases',
     versao: CHECKLIST_VERSION,
-    tasks: DEFAULT_CHECKLIST_TASKS_RH.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
+    tasks: [...DEFAULT_CHECKLIST_TASKS_RH, GOLIVE_MARKER_TASK].map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
     deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE_RH))
   });
   const CONSTRUTORES_TEMPLATE = [
@@ -1148,8 +1148,11 @@ async function atualizarProjetoSupabase(projeto) {
   if (!sbClient) return { ok:false, error:'Sem conexão com o servidor.' };
   const row = _projetoParaRow(projeto);
   delete row.id; // não se atualiza a PK
-  const { error } = await sbClient.from('projects').update(row).eq('id', projeto.id);
+  const { data, error } = await sbClient.from('projects').update(row).eq('id', projeto.id).select('id');
   if (error) return { ok:false, error: error.message };
+  if (!data || data.length === 0) {
+    return { ok:false, error:'nenhum registro foi alterado no servidor (verifique suas permissões).' };
+  }
   return { ok:true };
 }
 
@@ -1160,7 +1163,12 @@ function persistirTarefa(pId, task) {
   if (!sbClient || !task) return;
   const row = _tarefaParaRow(task, pId);
   delete row.id;
-  sbClient.from('tasks').update(row).eq('id', task.id).then(({ error }) => {
+  sbClient.from('tasks').update(row).eq('id', task.id).select('id').then(({ data, error }) => {
+    if (!error && (!data || data.length === 0)) {
+      console.error('Tarefa não gravada: 0 linhas afetadas', task.id);
+      notificar('Uma alteração de tarefa não foi gravada no servidor. Recarregue a página para conferir.', 'erro');
+      return;
+    }
     if (error) {
       console.error('Falha ao salvar tarefa:', error);
       notificar('Não foi possível salvar uma alteração de tarefa no servidor. Recarregue a página para conferir.', 'erro');
@@ -1207,14 +1215,20 @@ async function atualizarRiscoSupabase(risco, projectId) {
   if (!sbClient) return { ok:false, error:'Sem conexão com o servidor.' };
   const row = _riscoParaRow(risco, projectId);
   delete row.id;
-  const { error } = await sbClient.from('risks').update(row).eq('id', risco.id);
+  // .select() devolve as linhas afetadas: sem isso, um update bloqueado por
+  // permissão (0 linhas) não gera erro e a tela mostraria "salvo" sem ter salvo.
+  const { data, error } = await sbClient.from('risks').update(row).eq('id', risco.id).select('id');
   if (error) return { ok:false, error: error.message };
+  if (!data || data.length === 0) {
+    return { ok:false, error:'nenhum registro foi alterado no servidor (o risco pode ter sido removido ou você não tem permissão para editá-lo).' };
+  }
   return { ok:true };
 }
 async function excluirRiscoSupabase(riskId) {
   if (!sbClient) return { ok:false, error:'Sem conexão com o servidor.' };
-  const { error } = await sbClient.from('risks').delete().eq('id', riskId);
+  const { data, error } = await sbClient.from('risks').delete().eq('id', riskId).select('id');
   if (error) return { ok:false, error: error.message };
+  if (!data || data.length === 0) return { ok:false, error:'nenhum registro foi removido no servidor.' };
   return { ok:true };
 }
 
@@ -1464,6 +1478,39 @@ const RISK_CATEGORIES = ["Cliente","Dados e Migração","Parametrização","Dese
 
 // ── Riscos ──
 function getProjectRisks(project) { return Array.isArray(project?.risks) ? project.risks : []; }
+
+// ── MARCO DE GO-LIVE ──────────────────────────────────────────────
+// O Go-live só é considerado realizado quando esta tarefa recebe baixa.
+// Enquanto ela estiver pendente, a data de Go-live é apenas uma previsão.
+const GOLIVE_MARKER_LABEL = 'Marco: Go-live realizado';
+const GOLIVE_MARKER_TASK = {
+  fase: 'Fase 5 - Go-Live', tema: 'Geral', tarefa: GOLIVE_MARKER_LABEL,
+  responsavel: 'Consultor', esforco: '',
+  help: 'Dê baixa nesta tarefa quando o Go-live for efetivamente realizado. É ela que confirma a virada: enquanto estiver pendente, o sistema trata a data de Go-live como previsão e pode sinalizá-la como vencida.',
+  _goLiveMarker: true
+};
+function isGoLiveMarkerTask(t) {
+  if (!t) return false;
+  if (t._goLiveMarker === true) return true;
+  return _normTxt(t.tarefa || '') === _normTxt(GOLIVE_MARKER_LABEL);
+}
+function getGoLiveMarkerTask(project) {
+  return (Array.isArray(project?.tasks) ? project.tasks : []).find(isGoLiveMarkerTask) || null;
+}
+// O Go-live foi confirmado? Usa a tarefa-marco; se o projeto não tiver essa
+// tarefa (criado antes desta versão), considera realizado quando está 100%.
+function isGoLiveConfirmado(project) {
+  const t = getGoLiveMarkerTask(project);
+  if (t) return t.status === 'concluida';
+  const prog = calculateProjectProgress(project);
+  return prog.totalTasks > 0 && prog.percent === 100;
+}
+// Go-live vencido = data passou E a virada não foi confirmada.
+function isGoLiveVencido(project) {
+  if (!project?.goLive) return false;
+  if (isGoLiveConfirmado(project)) return false;
+  return daysLeft(project.goLive) < 0;
+}
 function getOpenProjectRisks(project) { return getProjectRisks(project).filter(r => r.status === 'aberto' || r.status === 'monitoramento'); }
 function getActiveGoLiveBlockers(project) {
   return getProjectRisks(project).filter(r => r.goLiveBlocker === true && r.status !== 'mitigado' && r.status !== 'encerrado');
@@ -1615,7 +1662,8 @@ function getProjectExecutiveStatus(project) {
   const reasons = [];
   const blockers = getActiveGoLiveBlockers(project);
   const dlGoLive = project?.goLive ? daysLeft(project.goLive) : null;
-  const goLiveVencido = dlGoLive != null && dlGoLive < 0;
+  // Vencido só quando a virada NÃO foi confirmada pela tarefa-marco de Go-live
+  const goLiveVencido = isGoLiveVencido(project);
   const concluido = prog.totalTasks > 0 && prog.percent === 100;
   const timeline = calculateProjectTimeline(project);
   const risks = getProjectRisks(project);
@@ -2035,7 +2083,6 @@ function renderExecutiveDashboard() {
   page.innerHTML = filtros
     + renderExecutiveIndicators(projetos)
     + renderExecutiveDistributions(projetos)
-    + renderUpcomingGoLives(projetos)
     + renderExecutiveProjectsTable(projetos);
 }
 
@@ -2194,7 +2241,12 @@ function renderExecutiveProjectsTable(projects) {
       <td>${fase.notStarted?`<span class="badge badge-gray" style="font-size:10px">Não iniciada</span>`:faseBadge(fase.name)}${!fase.notStarted?`<div style="font-size:10px;color:var(--gray-400);margin-top:3px">${fase.completedTasks} de ${fase.totalTasks} tarefas</div>`:''}</td>
       <td>${renderProjectTimeline(p)}</td>
       <td><div style="font-size:14px;font-weight:800;color:${prog.percent===100?'var(--success)':'var(--accent)'}">${prog.percent}%</div><div style="font-size:10px;color:var(--gray-400)">${prog.completedTasks}/${prog.totalTasks}</div></td>
-      <td><div style="font-size:12px;font-weight:600">${fmt(p.goLive)}</div>${dl!=null?`<div style="font-size:10px;color:${dl<0?'var(--danger)':dl<=30?'var(--warn)':'var(--gray-400)'}">${dl<0?`${Math.abs(dl)}d vencido`:`${dl}d`}</div>`:''}</td>
+      <td><div style="font-size:12px;font-weight:600">${fmt(p.goLive)}</div>${(() => {
+        if (!p.goLive) return '';
+        if (isGoLiveConfirmado(p)) return `<div style="font-size:10px;color:var(--success);font-weight:600"><i class="ti ti-circle-check" style="font-size:11px"></i> Realizado</div>`;
+        if (isGoLiveVencido(p)) return `<div style="font-size:10px;color:var(--danger);font-weight:600">${Math.abs(dl)}d vencido</div>`;
+        return `<div style="font-size:10px;color:${dl<=30?'var(--warn)':'var(--gray-400)'}">${dl}d</div>`;
+      })()}</td>
       <td><span class="badge ${st.badgeClass}" style="font-size:10px;cursor:help" title="${st.label}: ${reasonsTxt}" onclick="showProjectExecutiveSummary('${p.id}')">${st.label}</span></td>
       <td style="cursor:pointer" onclick="showProjectExecutiveSummary('${p.id}')">${riscoCel}</td>
       <td><div style="display:flex;gap:4px;flex-wrap:wrap">${renderProjectModules(p,{compact:true,hideWhenEmpty:true})||'<span style="font-size:11px;color:var(--gray-300)">—</span>'}</div></td>
@@ -2271,19 +2323,58 @@ function showProjectExecutiveSummary(projectId) {
     </tbody></table>
     <div style="margin-bottom:14px"><div style="font-size:11px;color:var(--gray-500);margin-bottom:4px">Módulos</div><div style="display:flex;gap:6px;flex-wrap:wrap">${renderProjectModules(p,{})}</div>${custom?`<div style="font-size:12px;color:var(--gray-500);margin-top:8px"><i class="ti ti-puzzle" style="font-size:12px"></i> <strong>Customizados:</strong> ${custom}</div>`:''}</div>
     ${st.reasons.length?`<div class="alert ${st.key==='critical'?'alert-danger':st.key==='attention'?'alert-warn':'alert-info'}" style="margin-bottom:14px"><div style="font-weight:600;margin-bottom:4px">Por que "${st.label}"?</div><ul style="margin:0;padding-left:18px;font-size:12px">${st.reasons.map(r=>`<li>${r}</li>`).join('')}</ul></div>`:''}
-    ${top5.length?`<div style="font-size:12px;font-weight:700;color:var(--gray-600);margin-bottom:8px">Principais riscos</div>
-      <div style="max-height:26vh;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px">
-        <table style="width:100%"><tbody>${top5.map(r=>`<tr>
-          <td style="font-size:12px;font-weight:500">${r.goLiveBlocker&&r.status!=='mitigado'&&r.status!=='encerrado'?`<i class="ti ti-ban" style="color:var(--danger);font-size:12px" title="Impeditivo"></i> `:''}${r.title}</td>
-          <td style="text-align:right">${renderRiskImpactBadge(r.impact)}</td>
-          <td style="text-align:right">${renderRiskStatusBadge(r.status)}</td>
-        </tr>`).join('')}</tbody></table>
-      </div>`:`<div style="font-size:12px;color:var(--gray-400)">Nenhum risco cadastrado para este projeto.</div>`}
+    ${(() => {
+      const todos = getProjectRisks(p);
+      if (!todos.length) return `<div style="font-size:12px;color:var(--gray-400)">Nenhum risco cadastrado para este projeto.</div>`;
+      const ativo = r => r.status !== 'mitigado' && r.status !== 'encerrado';
+      const pesoImp = { alto:0, medio:1, baixo:2 };
+      const ordenados = [...todos].sort((a,b) => {
+        const ia = (a.goLiveBlocker && ativo(a)) ? 0 : 1, ib = (b.goLiveBlocker && ativo(b)) ? 0 : 1;
+        if (ia !== ib) return ia - ib;
+        if (ativo(a) !== ativo(b)) return ativo(a) ? -1 : 1;
+        return (pesoImp[a.impact] ?? 3) - (pesoImp[b.impact] ?? 3);
+      });
+      return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:700;color:var(--gray-600)">Riscos do projeto (${todos.length})</div>
+          <div style="font-size:11px;color:var(--gray-400)">Clique em um risco para ver os detalhes</div>
+        </div>
+        <div style="max-height:30vh;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px">
+        <table style="width:100%"><thead><tr>
+          <th style="font-size:10px">Risco</th><th style="font-size:10px">Categoria</th>
+          <th style="font-size:10px">Prob.</th><th style="font-size:10px">Impacto</th>
+          <th style="font-size:10px">Situação</th><th style="font-size:10px">Responsável</th><th style="font-size:10px">Prazo</th>
+        </tr></thead><tbody>${ordenados.map(r => {
+          const imp = r.goLiveBlocker && ativo(r);
+          const venc = r.dueDate && ativo(r) && daysLeft(r.dueDate) < 0;
+          return `<tr style="cursor:pointer;${imp?'background:#fef2f2':''}" title="Abrir detalhes do risco" onclick="verRiscoDoResumo('${p.id}','${r.id}')">
+            <td style="font-size:12px;font-weight:500">${imp?`<i class="ti ti-ban" style="color:var(--danger);font-size:12px" title="Impeditivo de Go-live"></i> `:''}${r.title}</td>
+            <td style="font-size:11px;color:var(--gray-600)">${r.category||'—'}</td>
+            <td>${renderRiskProbabilityBadge(r.probability)}</td>
+            <td>${renderRiskImpactBadge(r.impact)}</td>
+            <td>${renderRiskStatusBadge(r.status)}</td>
+            <td style="font-size:11px;color:var(--gray-600)">${r.owner||'—'}</td>
+            <td style="font-size:11px;color:${venc?'var(--danger)':'var(--gray-500)'};font-weight:${venc?'600':'400'}">${r.dueDate?fmt(r.dueDate):'—'}</td>
+          </tr>`;
+        }).join('')}</tbody></table>
+        </div>`;
+    })()}
   </div>
   <div class="modal-footer">
     <button class="btn btn-secondary" onclick="closeModal();abrirProjeto('${p.id}')"><i class="ti ti-folder"></i> Abrir projeto</button>
     <button class="btn btn-primary" onclick="closeModal();abrirProjetoNaAba('${p.id}','riscos')"><i class="ti ti-alert-triangle"></i> Ver riscos</button>
   </div>`, true);
+}
+
+// Abre o detalhe de um risco a partir do resumo executivo, guardando de onde veio
+// para permitir voltar ao resumo ao fechar.
+function verRiscoDoResumo(pId, riskId) {
+  window._voltarResumoExecutivo = pId;
+  renderRiskForm(pId, riskId);
+}
+function voltarAoResumoExecutivo() {
+  const pId = window._voltarResumoExecutivo;
+  window._voltarResumoExecutivo = null;
+  if (pId) showProjectExecutiveSummary(pId); else closeModal();
 }
 
 function abrirProjetoNaAba(pId, aba) {
@@ -2413,7 +2504,7 @@ function renderRiskForm(projectId, riskId) {
     </div>
   </div>
   <div class="modal-footer">
-    <button class="btn btn-secondary" onclick="closeModal()">${somenteLeitura?'Fechar':'Cancelar'}</button>
+    <button class="btn btn-secondary" onclick="${'window._voltarResumoExecutivo ? voltarAoResumoExecutivo() : closeModal()'}">${somenteLeitura?'Fechar':'Cancelar'}</button>
     ${!somenteLeitura?`<button class="btn btn-primary" id="rBtnSalvar" onclick="salvarRisco('${projectId}'${riskId?`,'${riskId}'`:''})"><i class="ti ti-check"></i> ${r?'Salvar alterações':'Criar risco'}</button>`:''}
   </div>`, true);
 
@@ -2496,7 +2587,7 @@ async function salvarRisco(projectId, riskId = null) {
     if (ehNovo) p.risks.push(riscoObj);
     else { const idx = p.risks.findIndex(x=>x.id===riskId); if (idx>=0) p.risks[idx] = riscoObj; }
     saveState();
-    closeModal();
+    if (window._voltarResumoExecutivo) { voltarAoResumoExecutivo(); } else { closeModal(); }
     if (state.currentPage === 'projeto-detalhe' && state.viewMode === 'riscos') renderProjetoDetail(p);
     else if (state.currentPage === 'dashboard') renderDashboard();
     renderSidebar();
@@ -5203,50 +5294,123 @@ function salvarTarefa(pId, tId) {
 }
 
 function modalAdicionarTarefa(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode incluir tarefas.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
   const fases = Object.keys(FASE_COLORS);
   const temas = Object.keys(TEMA_COLORS);
+  const macros = Array.isArray(p.macroActivities) ? p.macroActivities : [];
   openModal(`<div class="modal-header">
-    <div class="modal-title"><i class="ti ti-plus" style="margin-right:8px;color:var(--accent)"></i>Nova tarefa</div>
+    <div class="modal-title"><i class="ti ti-plus" style="margin-right:8px;color:var(--accent)"></i>Nova tarefa — ${p.nome}</div>
     <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
   </div>
   <div class="modal-body">
-    <div class="form-group"><label class="form-label">Tarefa *</label><input class="form-input" id="ntTarefa" placeholder="Descreva a tarefa"></div>
+    <div id="ntAlert" class="form-alert" style="display:none"><i class="ti ti-alert-circle" style="font-size:15px"></i><span id="ntAlertMsg"></span></div>
+    <div class="form-group"><label class="form-label">Tarefa <span class="req-star">*</span></label>
+      <input class="form-input" id="ntTarefa" placeholder="Descreva a tarefa que surgiu"></div>
     <div class="form-grid">
-      <div class="form-group"><label class="form-label">Fase</label>
+      <div class="form-group"><label class="form-label">Fase <span class="req-star">*</span></label>
         <select class="form-input form-select" id="ntFase">${fases.map(f=>`<option>${f}</option>`).join('')}</select></div>
       <div class="form-group"><label class="form-label">Tema</label>
         <select class="form-input form-select" id="ntTema">${temas.map(t=>`<option>${t}</option>`).join('')}</select></div>
     </div>
-    <div class="form-grid">
-      <div class="form-group"><label class="form-label">Responsável</label><input class="form-input" id="ntResp" placeholder="Ex: Consultor, Analista..."></div>
-      <div class="form-group"><label class="form-label">Esforço estimado</label><input class="form-input" id="ntEsforco" placeholder="Ex: 4 horas"></div>
+    <div class="form-group">
+      <label class="form-label">Responsável <span class="req-star">*</span></label>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:6px 0">
+        ${['Consultor','Analista','Cliente'].map((r,i)=>`
+          <label for="ntResp-${i}" style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--gray-700);cursor:pointer">
+            <input type="checkbox" id="ntResp-${i}" name="ntResp" value="${r}" ${r==='Consultor'?'checked':''}> ${r}
+          </label>`).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--gray-400)">Pode marcar mais de um.</div>
     </div>
-    <div class="form-group"><label class="form-label">Prazo</label><input type="date" class="form-input" id="ntPrazo"></div>
-    <div class="form-group"><label class="form-label">Help / Orientação</label><textarea class="form-input form-textarea" id="ntHelp" placeholder="Descreva o objetivo e procedimento desta tarefa..."></textarea></div>
+    <div class="form-group">
+      <label class="form-label">Atividade macro <span style="font-weight:400;color:var(--gray-400)">(opcional)</span></label>
+      <select class="form-input form-select" id="ntMacro">
+        <option value="">— Sem vínculo com o cronograma —</option>
+        ${macros.map(m=>`<option value="${m.id}">${m.name||'(sem nome)'}${m.phase?' — '+m.phase:''}${m.endDate?' · até '+fmt(m.endDate):''}</option>`).join('')}
+      </select>
+      <div style="font-size:11px;color:var(--gray-400);margin-top:4px">
+        ${macros.length ? 'Ao vincular, a tarefa herda o prazo da atividade macro (se você não informar um prazo).' : 'Este projeto ainda não tem cronograma macro importado.'}
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label">Prazo <span style="font-weight:400;color:var(--gray-400)">(opcional)</span></label>
+        <input type="date" class="form-input" id="ntPrazo"></div>
+      <div class="form-group"><label class="form-label">Esforço estimado <span style="font-weight:400;color:var(--gray-400)">(opcional)</span></label>
+        <input class="form-input" id="ntEsforco" placeholder="Ex: 4 horas"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Orientação <span style="font-weight:400;color:var(--gray-400)">(opcional)</span></label>
+      <textarea class="form-input form-textarea" id="ntHelp" rows="2" placeholder="Objetivo e procedimento desta tarefa..."></textarea></div>
   </div>
   <div class="modal-footer">
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="salvarNovaTarefa('${pId}')"><i class="ti ti-check"></i> Adicionar</button>
+    <button class="btn btn-primary" id="ntBtnSalvar" onclick="salvarNovaTarefa('${pId}')"><i class="ti ti-check"></i> Adicionar tarefa</button>
   </div>`);
 }
 
-function salvarNovaTarefa(pId) {
-  const tarefa = document.getElementById('ntTarefa').value.trim();
-  if (!tarefa) return alert('Descreva a tarefa');
-  const p = state.projetos.find(x=>x.id===pId);
-  if (!p.tasks) p.tasks = [];
-  p.tasks.push({
-    id: uid(), tarefa, fase: document.getElementById('ntFase').value,
-    tema: document.getElementById('ntTema').value,
-    responsavel: document.getElementById('ntResp').value,
-    esforco: document.getElementById('ntEsforco').value,
-    prazo: document.getElementById('ntPrazo').value,
-    help: document.getElementById('ntHelp').value,
-    status: 'pendente', comentario: '', macroActivityId: null
-  });
+// Insere UMA tarefa nova no banco. Retorna {ok, error}.
+async function inserirTarefaSupabase(projeto, task) {
+  if (!sbClient) return { ok:false, error:'Sem conexão com o servidor.' };
+  const ordem = (projeto.tasks || []).indexOf(task);
+  const { data, error } = await sbClient.from('tasks')
+    .insert(_tarefaParaRow(task, projeto.id, ordem >= 0 ? ordem : (projeto.tasks||[]).length))
+    .select('id');
+  if (error) return { ok:false, error: error.message };
+  if (!data || data.length === 0) return { ok:false, error:'a tarefa não foi gravada no servidor (verifique suas permissões).' };
+  return { ok:true };
+}
+
+async function salvarNovaTarefa(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode incluir tarefas.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  const el = id => document.getElementById(id);
+  const erro = msg => { const a=el('ntAlert'), m=el('ntAlertMsg'); if(a&&m){ m.textContent=msg; a.style.display='flex'; } };
+  if (el('ntAlert')) el('ntAlert').style.display = 'none';
+
+  const tarefa = (el('ntTarefa')?.value || '').trim();
+  if (!tarefa) { erro('Descreva a tarefa.'); el('ntTarefa')?.focus(); return; }
+  const responsaveis = [...document.querySelectorAll('input[name="ntResp"]:checked')].map(c => c.value);
+  if (!responsaveis.length) { erro('Selecione ao menos um responsável.'); return; }
+
+  const macroId = el('ntMacro')?.value || '';
+  const macro = macroId ? (p.macroActivities||[]).find(m => m.id === macroId) : null;
+  let prazo = el('ntPrazo')?.value || null;
+  let prazoOrigem = prazo ? 'manual' : null;
+  if (!prazo && macro && macro.endDate) { prazo = macro.endDate; prazoOrigem = 'macro'; }
+
+  if (!Array.isArray(p.tasks)) p.tasks = [];
+  const nova = {
+    id: uid(), tarefa,
+    fase: el('ntFase').value, tema: el('ntTema').value,
+    responsavel: responsaveis.join(';'),
+    esforco: (el('ntEsforco')?.value || '').trim(),
+    status: 'pendente', prazo, prazoOrigem,
+    _prazoManual: prazoOrigem === 'manual',
+    help: (el('ntHelp')?.value || '').trim(),
+    comentario: '', templateTaskId: null,
+    macroActivityId: macro ? macro.id : null
+  };
+
+  const btn = el('ntBtnSalvar');
+  const lbl = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Salvando...'; }
+
+  p.tasks.push(nova);
+  const res = await inserirTarefaSupabase(p, nova);
+  if (!res.ok) {
+    p.tasks = p.tasks.filter(t => t.id !== nova.id);  // desfaz na tela
+    if (btn) { btn.disabled = false; btn.innerHTML = lbl; }
+    erro('Não foi possível adicionar: ' + res.error);
+    return;
+  }
   saveState();
+  if (btn) { btn.disabled = false; btn.innerHTML = lbl; }
   closeModal();
   renderProjetoDetail(p);
+  renderSidebar();
+  notificar('Tarefa adicionada ao projeto.', 'sucesso');
 }
 
 // ==================== MINHAS TAREFAS (drill-down: Projeto → Fase → Tarefas) ====================
