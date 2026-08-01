@@ -552,7 +552,7 @@ const DEFAULT_DEPARA_TEMPLATE = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-01-paginacao';
+const DOS_BUILD = '2026-08-01-portfolio-golive';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -2092,7 +2092,19 @@ function renderProjectTimeline(project) {
 }
 
 function renderExecutiveProjectsTable(projects) {
-  const linhas = projects.map(p => {
+  // Ordenação executiva: por Go-live (mais próximo primeiro).
+  // Projetos sem Go-live vão para o fim da lista.
+  const ordenados = [...projects].sort((a, b) => {
+    const da = a.goLive ? parseLocalDate(a.goLive) : null;
+    const db = b.goLive ? parseLocalDate(b.goLive) : null;
+    if (!da && !db) return (a.nome || '').localeCompare(b.nome || '');
+    if (!da) return 1;
+    if (!db) return -1;
+    if (da.getTime() !== db.getTime()) return da - db;
+    return (a.nome || '').localeCompare(b.nome || '');
+  });
+
+  const linhas = ordenados.map(p => {
     const fase = getProjectCurrentPhase(p);
     const prog = calculateProjectProgress(p);
     const st = getProjectExecutiveStatus(p);
@@ -2110,15 +2122,23 @@ function renderExecutiveProjectsTable(projects) {
       <td><div style="font-size:12px;font-weight:600">${fmt(p.goLive)}</div>${dl!=null?`<div style="font-size:10px;color:${dl<0?'var(--danger)':dl<=30?'var(--warn)':'var(--gray-400)'}">${dl<0?`${Math.abs(dl)}d vencido`:`${dl}d`}</div>`:''}</td>
       <td><span class="badge ${st.badgeClass}" style="font-size:10px;cursor:help" title="${st.label}: ${reasonsTxt}" onclick="showProjectExecutiveSummary('${p.id}')">${st.label}</span></td>
       <td style="cursor:pointer" onclick="showProjectExecutiveSummary('${p.id}')">${riscoCel}</td>
-      <td><div style="display:flex;gap:4px;flex-wrap:wrap;max-width:150px">${renderProjectModules(p,{compact:true,hideWhenEmpty:true})||'<span style="font-size:11px;color:var(--gray-300)">—</span>'}</div></td>
-      <td style="font-size:11px;color:var(--gray-600)">${p.consultor||'—'}</td>
-      <td style="font-size:11px;color:var(--gray-600)">${p.analista||'—'}</td>
+      <td><div style="display:flex;gap:4px;flex-wrap:wrap">${renderProjectModules(p,{compact:true,hideWhenEmpty:true})||'<span style="font-size:11px;color:var(--gray-300)">—</span>'}</div></td>
     </tr>`;
   }).join('');
   return `<div class="card" style="padding:0;overflow:hidden">
-    <div class="card-header" style="padding:14px 16px"><div class="card-title"><i class="ti ti-folder" style="margin-right:6px;color:var(--accent)"></i>Portfólio de projetos (${projects.length})</div></div>
-    <div style="overflow-x:auto"><table style="width:100%;min-width:960px">
-      <thead><tr><th>Projeto</th><th>Fase atual</th><th>Linha do tempo</th><th>Conclusão</th><th>Go-live</th><th>Situação</th><th>Riscos</th><th>Módulos</th><th>Consultor</th><th>Analista</th></tr></thead>
+    <div class="card-header" style="padding:14px 16px"><div class="card-title"><i class="ti ti-folder" style="margin-right:6px;color:var(--accent)"></i>Portfólio de projetos (${ordenados.length})</div><div style="font-size:11px;color:var(--gray-400)">Ordenado por Go-live</div></div>
+    <div style="overflow-x:auto"><table style="width:100%;min-width:760px;table-layout:fixed">
+      <colgroup>
+        <col style="width:20%">
+        <col style="width:14%">
+        <col style="width:16%">
+        <col style="width:9%">
+        <col style="width:11%">
+        <col style="width:10%">
+        <col style="width:11%">
+        <col style="width:9%">
+      </colgroup>
+      <thead><tr><th>Projeto</th><th>Fase atual</th><th>Linha do tempo</th><th>Conclusão</th><th>Go-live</th><th>Situação</th><th>Riscos</th><th>Módulos</th></tr></thead>
       <tbody>${linhas}</tbody>
     </table></div>
   </div>`;
