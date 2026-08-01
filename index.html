@@ -887,12 +887,35 @@ function _mapProjectRow(p, tasksByProject, risksByProject) {
 }
 
 let _projetosCarregando = false;
+
+// O Supabase/PostgREST devolve no máximo 1000 linhas por consulta. Como um único
+// projeto já tem ~216 tarefas, a partir de ~5 projetos a busca vinha truncada
+// (sintoma: gestor via percentuais/fases errados; quem via poucos projetos, não).
+// Esta função pagina até trazer tudo.
+async function _fetchAllRows(tabela, tamanhoPagina = 1000) {
+  const todas = [];
+  let de = 0;
+  for (;;) {
+    const { data, error } = await sbClient
+      .from(tabela).select('*')
+      .order('id', { ascending: true })
+      .range(de, de + tamanhoPagina - 1);
+    if (error) return { data: null, error };
+    const lote = data || [];
+    todas.push(...lote);
+    if (lote.length < tamanhoPagina) break;   // última página
+    de += tamanhoPagina;
+    if (de > 200000) break;                    // trava de segurança
+  }
+  return { data: todas, error: null };
+}
+
 // Busca a equipe (app_users) do Supabase e preenche state.users.
 // É essa lista que alimenta os campos de consultor/analista dos projetos.
 async function carregarUsuariosDoSupabase() {
   if (!sbClient) return;
   try {
-    const { data, error } = await sbClient.from('app_users').select('*');
+    const { data, error } = await _fetchAllRows('app_users');
     if (error) {
       console.error('Erro ao carregar usuários:', error);
       return;
@@ -924,10 +947,11 @@ async function carregarProjetosDoSupabase() {
     // Carrega a equipe junto — é ela que alimenta os seletores de responsável.
     await carregarUsuariosDoSupabase();
     // O RLS já limita o que cada usuário enxerga; não precisamos filtrar aqui.
+    // Busca paginada: sem isso, consultas acima de 1000 linhas vinham cortadas.
     const [projRes, taskRes, riskRes] = await Promise.all([
-      sbClient.from('projects').select('*'),
-      sbClient.from('tasks').select('*'),
-      sbClient.from('risks').select('*')
+      _fetchAllRows('projects'),
+      _fetchAllRows('tasks'),
+      _fetchAllRows('risks')
     ]);
     if (projRes.error || taskRes.error || riskRes.error) {
       console.error('Erro ao carregar do Supabase:', projRes.error || taskRes.error || riskRes.error);
