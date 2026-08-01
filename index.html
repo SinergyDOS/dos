@@ -1417,30 +1417,69 @@ function getProjectCurrentPhase(project) {
 function calculateProjectTimeline(project) {
   const start = project?.dataInicio || null;
   const goLive = project?.goLive || null;
-  const actualPercent = calculateProjectProgress(project).percent;
   const hoje = new Date(); hoje.setHours(0,0,0,0);
-  if (!start || !goLive) {
-    return { startDate:start, goLiveDate:goLive, today:hoje, totalDays:0, elapsedDays:0, remainingDays:0, expectedPercent:0, actualPercent, variance:0, todayPosition:0, status:'sem-dados' };
+  const tasks = Array.isArray(project?.tasks) ? project.tasks : [];
+  const totalTasks = tasks.length;
+  // Universo planejado: tarefas que têm prazo definido (vindo do cronograma macro
+  // ou definido manualmente). É sobre ele que medimos realizado x esperado.
+  const comPrazo = tasks.filter(t => t.prazo);
+  const plannedTasks = comPrazo.length;
+
+  // Posição do "hoje" na barra (visual) — depende das datas do projeto
+  let todayPosition = 0;
+  let totalDays = 0, elapsedDays = 0, remainingDays = 0;
+  if (start && goLive) {
+    const d0 = new Date(start + 'T00:00:00');
+    const d1 = new Date(goLive + 'T00:00:00');
+    totalDays = Math.max(1, Math.round((d1 - d0) / 86400000));
+    const elapsed = Math.round((hoje - d0) / 86400000);
+    elapsedDays = Math.max(0, Math.min(totalDays, elapsed));
+    remainingDays = Math.round((d1 - hoje) / 86400000);
+    todayPosition = Math.max(0, Math.min(100, ((hoje - d0) / (d1 - d0)) * 100));
   }
-  const d0 = new Date(start + 'T00:00:00');
-  const d1 = new Date(goLive + 'T00:00:00');
-  const totalDays = Math.max(1, Math.round((d1 - d0) / 86400000));
-  const elapsed = Math.round((hoje - d0) / 86400000);
-  const elapsedDays = Math.max(0, Math.min(totalDays, elapsed));
-  const remainingDays = Math.round((d1 - hoje) / 86400000);
-  let expectedPercent;
-  if (hoje < d0) expectedPercent = 0;
-  else if (hoje > d1) expectedPercent = 100;
-  else expectedPercent = Math.round(elapsed / totalDays * 100);
+
+  let actualPercent, expectedPercent, basis;
+
+  if (plannedTasks > 0) {
+    // ── Base PRAZO: compara o que já deveria estar entregue com o que foi entregue.
+    // Reflete a curva real do plano (que raramente é linear no calendário).
+    const concluidas = comPrazo.filter(t => t.status === 'concluida').length;
+    const vencidas = comPrazo.filter(t => {
+      const d = parseLocalDate(t.prazo);
+      return d && d <= hoje;
+    }).length;
+    actualPercent = Math.round(concluidas / plannedTasks * 100);
+    expectedPercent = Math.round(vencidas / plannedTasks * 100);
+    basis = 'prazo';
+  } else {
+    // ── Base CALENDÁRIO (fallback): sem cronograma/prazos, só resta o relógio.
+    if (!start || !goLive) {
+      return { startDate:start, goLiveDate:goLive, today:hoje, totalDays:0, elapsedDays:0, remainingDays:0,
+               expectedPercent:0, actualPercent:0, variance:0, todayPosition:0, status:'sem-dados',
+               basis:'sem-dados', plannedTasks:0, totalTasks };
+    }
+    actualPercent = calculateProjectProgress(project).percent;
+    const d0 = new Date(start + 'T00:00:00');
+    const d1 = new Date(goLive + 'T00:00:00');
+    const elapsed = Math.round((hoje - d0) / 86400000);
+    if (hoje < d0) expectedPercent = 0;
+    else if (hoje > d1) expectedPercent = 100;
+    else expectedPercent = Math.round(elapsed / totalDays * 100);
+    basis = 'calendario';
+  }
+
+  actualPercent = Math.max(0, Math.min(100, actualPercent));
   expectedPercent = Math.max(0, Math.min(100, expectedPercent));
   const variance = actualPercent - expectedPercent;
-  let todayPosition = ((hoje - d0) / (d1 - d0)) * 100;
-  todayPosition = Math.max(0, Math.min(100, todayPosition));
+
   let status;
   if (variance >= -10) status = 'no-prazo';
   else if (variance >= -20) status = 'atencao';
   else status = 'critico';
-  return { startDate:start, goLiveDate:goLive, today:hoje, totalDays, elapsedDays, remainingDays, expectedPercent, actualPercent, variance, todayPosition, status };
+
+  return { startDate:start, goLiveDate:goLive, today:hoje, totalDays, elapsedDays, remainingDays,
+           expectedPercent, actualPercent, variance, todayPosition, status,
+           basis, plannedTasks, totalTasks };
 }
 
 // ── Situação executiva (calculada, nunca salva) ──
@@ -1984,13 +2023,17 @@ function renderProjectTimeline(project) {
   }
   const corVar = tl.status === 'no-prazo' ? 'var(--success)' : tl.status === 'atencao' ? 'var(--warn)' : 'var(--danger)';
   const sinal = tl.variance >= 0 ? '+' : '';
-  return `<div title="Realizado ${tl.actualPercent}% · Esperado ${tl.expectedPercent}% · Desvio ${sinal}${tl.variance} p.p." style="min-width:150px">
+  const baseTxt = tl.basis === 'prazo'
+    ? `Base: prazos planejados (${tl.plannedTasks} de ${tl.totalTasks} tarefas com prazo)`
+    : `Base: calendário — sem prazos definidos (estimativa)`;
+  const marcaEstimativa = tl.basis === 'calendario' ? '~' : '';
+  return `<div title="Realizado ${tl.actualPercent}% · Esperado ${tl.expectedPercent}% · Desvio ${sinal}${tl.variance} p.p.&#10;${baseTxt}" style="min-width:150px">
     <div style="position:relative;height:10px;background:var(--gray-100);border-radius:5px;overflow:visible">
       <div style="position:absolute;left:0;top:0;height:100%;width:${tl.actualPercent}%;background:${corVar};border-radius:5px"></div>
       <div style="position:absolute;left:${tl.expectedPercent}%;top:-2px;height:14px;width:2px;background:var(--gray-700)" title="Esperado ${tl.expectedPercent}%"></div>
       <div style="position:absolute;left:${tl.todayPosition}%;top:-4px;transform:translateX(-50%);font-size:9px;color:var(--accent)"><i class="ti ti-caret-down-filled"></i></div>
     </div>
-    <div style="font-size:10px;color:${corVar};margin-top:3px;font-weight:600">Real ${tl.actualPercent}% · Esp ${tl.expectedPercent}% · ${sinal}${tl.variance}p.p.</div>
+    <div style="font-size:10px;color:${corVar};margin-top:3px;font-weight:600">Real ${tl.actualPercent}% · Esp ${marcaEstimativa}${tl.expectedPercent}% · ${sinal}${tl.variance}p.p.</div>
   </div>`;
 }
 
@@ -2057,10 +2100,18 @@ function showProjectExecutiveSummary(projectId) {
       ${fase.notStarted?`<span class="badge badge-gray">Não iniciada</span>`:faseBadge(fase.name)}
       <span style="font-size:12px;color:var(--gray-500)">${p.cliente}</span>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:6px">
       <div style="background:var(--gray-50);border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:var(--gray-500)">Progresso realizado</div><div style="font-size:20px;font-weight:800;color:${prog.percent===100?'var(--success)':'var(--accent)'}">${prog.percent}%</div></div>
       <div style="background:var(--gray-50);border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:var(--gray-500)">Esperado (linha do tempo)</div><div style="font-size:20px;font-weight:800;color:var(--gray-600)">${tl.status==='sem-dados'?'—':tl.expectedPercent+'%'}</div></div>
       <div style="background:var(--gray-50);border-radius:8px;padding:10px 12px"><div style="font-size:11px;color:var(--gray-500)">Desvio</div><div style="font-size:20px;font-weight:800;color:${tl.variance>=-10?'var(--success)':tl.variance>=-20?'var(--warn)':'var(--danger)'}">${tl.status==='sem-dados'?'—':sinal+tl.variance+' p.p.'}</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--gray-400);margin-bottom:16px;display:flex;gap:6px;align-items:flex-start">
+      <i class="ti ti-info-circle" style="font-size:12px;margin-top:1px"></i>
+      <span>${tl.basis==='prazo'
+        ? `Esperado e desvio calculados sobre os prazos planejados — ${tl.plannedTasks} de ${tl.totalTasks} tarefas com prazo definido. Realizado no card acima considera todas as tarefas.`
+        : tl.basis==='calendario'
+          ? `Sem prazos definidos nas tarefas: o esperado é uma estimativa pelo calendário (proporção do tempo decorrido), que assume ritmo linear. Importe o cronograma para um cálculo fiel ao plano.`
+          : `Sem datas e sem prazos definidos — não é possível calcular o esperado.`}</span>
     </div>
     <table style="width:100%;margin-bottom:14px"><tbody style="font-size:13px">
       <tr><td style="color:var(--gray-500);padding:5px 0">Início</td><td style="text-align:right">${fmt(p.dataInicio)}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Go-live</td><td style="text-align:right">${fmt(p.goLive)}</td></tr>
