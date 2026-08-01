@@ -600,7 +600,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-01-ajustes-exec';
+const DOS_BUILD = '2026-08-01-nova-tarefa';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -3255,7 +3255,7 @@ function renderProjetoDetail(p) {
   document.getElementById('topbar-actions').innerHTML = `
     <button class="btn btn-secondary btn-sm" onclick="nav('projetos')"><i class="ti ti-arrow-left"></i> Projetos</button>
     ${isGestor() ? `<button class="btn btn-secondary btn-sm" onclick="editarProjeto('${p.id}')"><i class="ti ti-edit"></i> Editar projeto</button>` : ''}
-    ${isGestor() ? `<button class="btn btn-primary btn-sm" onclick="modalAdicionarTarefa('${p.id}')"><i class="ti ti-plus"></i> Tarefa</button>` : ''}`;
+    ${isGestor() ? `<button class="btn btn-primary btn-sm" onclick="modalAdicionarTarefa('${p.id}')"><i class="ti ti-plus"></i> Nova tarefa</button>` : ''}`;
 
   const tasks = p.tasks || [];
   const done = tasks.filter(t=>t.status==='concluida').length;
@@ -3332,6 +3332,7 @@ function renderProjetoDetail(p) {
         return `<option value="${k}" ${state.filterMacroStatus===k?'selected':''}>${labels[k]}</option>`;
       }).join('')}
     </select>
+    ${isGestor() ? `<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="modalAdicionarTarefa('${p.id}')" title="Incluir uma tarefa específica neste projeto"><i class="ti ti-plus"></i> Nova tarefa</button>` : ''}
     `}
   </div>
 </div>
@@ -5305,6 +5306,10 @@ function modalAdicionarTarefa(pId) {
     <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
   </div>
   <div class="modal-body">
+    <div style="background:#eff6ff;border-radius:8px;padding:9px 12px;margin-bottom:14px;font-size:12px;color:var(--gray-600);display:flex;gap:8px;align-items:flex-start">
+      <i class="ti ti-info-circle" style="color:var(--accent);font-size:14px;margin-top:1px"></i>
+      <span>Esta tarefa será incluída <strong>somente neste projeto</strong>. O checklist padrão e os demais projetos não são alterados.</span>
+    </div>
     <div id="ntAlert" class="form-alert" style="display:none"><i class="ti ti-alert-circle" style="font-size:15px"></i><span id="ntAlertMsg"></span></div>
     <div class="form-group"><label class="form-label">Tarefa <span class="req-star">*</span></label>
       <input class="form-input" id="ntTarefa" placeholder="Descreva a tarefa que surgiu"></div>
