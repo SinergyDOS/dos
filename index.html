@@ -550,6 +550,12 @@ const DEFAULT_DEPARA_TEMPLATE = [
 // ==================== SUPABASE ====================
 // Conexão com o backend (Fase 2 - login). Os DADOS ainda vêm do localStorage
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
+// Marcador de build: permite confirmar qual versão está publicada.
+// Aparece no console ao abrir e em window.DOS_BUILD.
+const DOS_BUILD = '2026-08-01-paginacao';
+try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
+window.DOS_BUILD = DOS_BUILD;
+
 const SUPABASE_URL = 'https://aiiymhpzaxhuirxmemoq.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_MMdgoCTbjVmR2l1BWLGOUA_GiYMx1-_';
 let sbClient = null;
@@ -884,6 +890,30 @@ function _mapProjectRow(p, tasksByProject, risksByProject) {
     criadoEm: p.created_at,
     _demo: !!p.is_demo
   };
+}
+
+// Diagnóstico: rode diagnosticoDOS() no console do navegador para ver
+// exatamente o que o sistema carregou do servidor para o usuário logado.
+function diagnosticoDOS() {
+  const linhas = (state.projetos || []).map(p => {
+    const prog = calculateProjectProgress(p);
+    const fase = getProjectCurrentPhase(p);
+    return {
+      projeto: p.nome,
+      tarefas: (p.tasks || []).length,
+      concluidas: prog.completedTasks,
+      percent: prog.percent + '%',
+      fase: fase.notStarted ? 'Não iniciada' : fase.name,
+      riscos: (p.risks || []).length,
+      id: p.id
+    };
+  });
+  console.log('DOS build:', typeof DOS_BUILD !== 'undefined' ? DOS_BUILD : '(desconhecido)');
+  console.log('Usuário:', state.currentUser?.name, '| tipo:', state.currentUser?.tipo);
+  console.log('Projetos carregados:', linhas.length,
+              '| total de tarefas:', linhas.reduce((s, l) => s + l.tarefas, 0));
+  try { console.table(linhas); } catch (e) { console.log(linhas); }
+  return linhas;
 }
 
 let _projetosCarregando = false;
