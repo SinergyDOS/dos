@@ -603,7 +603,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-02-concluida-em';
+const DOS_BUILD = '2026-08-02-despachar-fix';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -5622,11 +5622,29 @@ function _mdPapeisNoProjeto(p, nome) {
   if (normalizePersonName(p.analista) === n) papeis.push('analista');
   return papeis;
 }
-function _mdTarefaEhMinha(p, t, nome) {
-  if (taskPertenceAoUsuario(t, nome)) return true;
-  const partes = String(t.responsavel || '').split(';').map(x => x.trim().toLowerCase());
-  if (partes.includes(normalizePersonName(nome))) return true;
-  return _mdPapeisNoProjeto(p, nome).some(papel => partes.includes(papel));
+// A pessoa corresponde a esta parte do campo responsável?
+// Casa por nome próprio, pelo perfil cadastrado ou pelo papel exercido no projeto.
+function _mdCasaResponsavel(p, nome, parte) {
+  if (!parte) return false;
+  if (parte === normalizePersonName(nome)) return true;
+  if (parte === (state.currentUser?.tipo || '').toLowerCase()) return true;
+  return _mdPapeisNoProjeto(p, nome).includes(parte);
+}
+// Como a tarefa entra no Meu dia desta pessoa.
+// Retorna null quando não é dela.
+function _mdClassificarTarefa(p, t, nome) {
+  const partes = String(t.responsavel || '').split(';').map(x => x.trim().toLowerCase()).filter(Boolean);
+  const temCliente = partes.includes('cliente');
+  const outras = partes.filter(x => x !== 'cliente');
+  const souResponsavel = outras.some(parte => _mdCasaResponsavel(p, nome, parte));
+
+  if (souResponsavel) {
+    // Se a tarefa é minha E também envolve o cliente, é minha para despachar.
+    return temCliente ? 'despachar' : 'fazer';
+  }
+  // Tarefa exclusivamente do cliente: quem toca o projeto é quem cobra.
+  if (temCliente && outras.length === 0 && _mdSouDoProjeto(p, nome)) return 'despachar';
+  return null;   // responsabilidade de outra pessoa
 }
 
 function _mdDiasParado(t) {
@@ -5656,18 +5674,14 @@ function montarMeuDia() {
       blockers: getActiveGoLiveBlockers(p).length,
       fase: getProjectCurrentPhase(p)
     };
-    const souDoProjeto = _mdSouDoProjeto(p, nome);
     (p.tasks || []).forEach(t => {
       // concluídas somem, exceto as de hoje (para permitir desfazer)
       if (t.status === 'concluida' && !tarefaConcluidaHoje(t)) return;
-      const partes = String(t.responsavel || '').split(';').map(x => x.trim().toLowerCase());
-      const respCliente = partes.includes('cliente');
-      // Tarefa do cliente não "pertence" ao consultor pela regra normal, mas
-      // despachá-la e cobrá-la é trabalho de quem toca o projeto.
-      if (!_mdTarefaEhMinha(p, t, nome) && !(respCliente && souDoProjeto)) return;
+      const destino = _mdClassificarTarefa(p, t, nome);
+      if (!destino) return;
       const item = { p, t, ctx, score: _mdScoreTarefa(p, t, ctx), dl: t.prazo ? daysLeft(t.prazo) : null };
       if (t.status === 'bloqueada') { destravar.push(item); return; }
-      if (respCliente) { despachar.push(item); return; }
+      if (destino === 'despachar') { despachar.push(item); return; }
       fazer.push(item);
     });
   });
