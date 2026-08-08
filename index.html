@@ -603,7 +603,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-02-meu-dia-b';
+const DOS_BUILD = '2026-08-02-concluida-em';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -921,6 +921,7 @@ function _mapTaskRow(r) {
     comentario: r.comentario || '',
     templateTaskId: r.template_task_id,
     macroActivityId: r.macro_activity_id,
+    concluidaEm: r.concluida_em || null,
     bloqueioCom: r.bloqueio_com || '',
     bloqueioDesde: r.bloqueio_desde || null,
     bloqueioObs: r.bloqueio_obs || '',
@@ -1127,6 +1128,7 @@ function _tarefaParaRow(t, projectId, ordem) {
     comentario: t.comentario || null,
     template_task_id: t.templateTaskId || null,
     macro_activity_id: t.macroActivityId || null,
+    concluida_em: t.concluidaEm || null,
     bloqueio_com: t.bloqueioCom || null,
     bloqueio_desde: t.bloqueioDesde || null,
     bloqueio_obs: t.bloqueioObs || null,
@@ -1168,6 +1170,28 @@ async function atualizarProjetoSupabase(projeto) {
 // ── ESCRITA DE TAREFAS (otimista) ──
 // Grava a tarefa no banco em segundo plano; a UI já foi atualizada antes de chamar.
 // Se falhar, avisa o usuário (sem travar a interface).
+// Ponto único de mudança de status de tarefa: mantém concluidaEm coerente.
+// Registrar quando foi concluída permite consultar depois e saber se a baixa
+// foi hoje (usado no Meu dia para permitir desfazer).
+function aplicarStatusTarefa(t, novoStatus) {
+  if (!t) return;
+  const antes = t.status;
+  t.status = novoStatus;
+  if (novoStatus === 'concluida') {
+    if (antes !== 'concluida' || !t.concluidaEm) t.concluidaEm = new Date().toISOString();
+  } else {
+    t.concluidaEm = null;
+  }
+}
+// A tarefa foi concluída hoje?
+function tarefaConcluidaHoje(t) {
+  if (!t || t.status !== 'concluida' || !t.concluidaEm) return false;
+  const d = new Date(t.concluidaEm);
+  if (isNaN(d)) return false;
+  const hoje = new Date();
+  return d.getFullYear() === hoje.getFullYear() && d.getMonth() === hoje.getMonth() && d.getDate() === hoje.getDate();
+}
+
 function persistirTarefa(pId, task) {
   if (!sbClient || !task) return;
   const row = _tarefaParaRow(task, pId);
@@ -5265,7 +5289,7 @@ function toggleTask(pId, tId, checked) {
   const p = state.projetos.find(x=>x.id===pId);
   const t = p?.tasks?.find(x=>x.id===tId);
   if (t) {
-    t.status = checked ? 'concluida' : 'pendente';
+    aplicarStatusTarefa(t, checked ? 'concluida' : 'pendente');
     saveState();
     persistirTarefa(pId, t);
     renderSidebar();
@@ -5277,7 +5301,7 @@ function mudarStatus(pId, tId, status) {
   const p = state.projetos.find(x=>x.id===pId);
   const t = p?.tasks?.find(x=>x.id===tId);
   if (t) {
-    t.status = status;
+    aplicarStatusTarefa(t, status);
     saveState();
     persistirTarefa(pId, t);
     renderSidebar();
@@ -5363,6 +5387,9 @@ function abrirTarefa(pId, tId) {
       <label class="form-label">Prazo</label>
       <input type="date" class="form-input" id="tPrazo" value="${t.prazo||''}">
     </div>
+    ${t.status==='concluida' && t.concluidaEm ? `<div style="font-size:11.5px;color:var(--success);margin:-6px 0 14px;display:flex;align-items:center;gap:5px">
+      <i class="ti ti-circle-check" style="font-size:13px"></i> Concluída em ${new Date(t.concluidaEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
+    </div>` : ''}
     <div class="form-group">
       <label class="form-label">Atividade macro vinculada <span style="font-weight:400;color:var(--gray-400)">(opcional)</span></label>
       <select class="form-input form-select" id="tMacroActivity">
@@ -5386,7 +5413,7 @@ function salvarTarefa(pId, tId) {
   const p = state.projetos.find(x=>x.id===pId);
   const t = p?.tasks?.find(x=>x.id===tId);
   if (!t) return;
-  t.status = document.getElementById('tStatus').value;
+  aplicarStatusTarefa(t, document.getElementById('tStatus').value);
   const novoPrazo = document.getElementById('tPrazo').value;
   // Se o usuário alterou o prazo manualmente, marca para não ser sobrescrito pelas datas da macro
   if (novoPrazo !== (t.prazo || '')) {
@@ -5615,7 +5642,11 @@ function montarMeuDia() {
   const nome = state.currentUser?.name || '';
   const projetos = projetosVisiveis().filter(p => {
     const prog = calculateProjectProgress(p);
-    return !(prog.totalTasks > 0 && prog.percent === 100);   // projeto concluído sai
+    if (prog.totalTasks > 0 && prog.percent === 100) {
+      // projeto concluído sai, salvo se houve baixa hoje (para poder desfazer)
+      return (p.tasks || []).some(tarefaConcluidaHoje);
+    }
+    return true;
   });
 
   const destravar = [], despachar = [], fazer = [], radar = [];
@@ -5627,7 +5658,8 @@ function montarMeuDia() {
     };
     const souDoProjeto = _mdSouDoProjeto(p, nome);
     (p.tasks || []).forEach(t => {
-      if (t.status === 'concluida') return;
+      // concluídas somem, exceto as de hoje (para permitir desfazer)
+      if (t.status === 'concluida' && !tarefaConcluidaHoje(t)) return;
       const partes = String(t.responsavel || '').split(';').map(x => x.trim().toLowerCase());
       const respCliente = partes.includes('cliente');
       // Tarefa do cliente não "pertence" ao consultor pela regra normal, mas
@@ -5640,8 +5672,11 @@ function montarMeuDia() {
     });
   });
 
-  const porScore = (a,b) => b.score - a.score;
+  // concluídas hoje ficam no fim do bloco, sem atrapalhar o foco
+  const feitaDepois = (a,b) => (a.t.status==='concluida'?1:0) - (b.t.status==='concluida'?1:0);
+  const porScore = (a,b) => feitaDepois(a,b) || (b.score - a.score);
   destravar.sort((a,b) => {
+    const f = feitaDepois(a,b); if (f) return f;
     const da = _mdDiasParado(a.t) ?? -1, db = _mdDiasParado(b.t) ?? -1;
     if (da !== db) return db - da;      // parado há mais tempo primeiro
     return porScore(a,b);
@@ -5650,7 +5685,10 @@ function montarMeuDia() {
   fazer.sort(porScore);
   const foco = fazer.slice(0, 6);
   const resto = fazer.slice(6, 16);
-  return { destravar, despachar, foco, radar: resto, totalAberto: destravar.length + despachar.length + fazer.length };
+  const emAberto = arr => arr.filter(i => i.t.status !== 'concluida').length;
+  return { destravar, despachar, foco, radar: resto,
+           totalAberto: emAberto(destravar) + emAberto(despachar) + emAberto(fazer),
+           feitasHoje: [...destravar, ...despachar, ...fazer].filter(i => i.t.status === 'concluida').length };
 }
 
 function _mdChipPrazo(dl) {
@@ -5664,16 +5702,16 @@ function _mdChipPrazo(dl) {
 function _mdLinha(item, extra) {
   const { p, t, ctx, dl } = item;
   const critico = ctx.status.key === 'critical';
-  return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-top:1px solid var(--gray-100);cursor:pointer" onclick="abrirTarefa('${p.id}','${t.id}')">
-    <input type="checkbox" style="margin-top:3px;flex-shrink:0" onclick="event.stopPropagation();toggleTaskMeuDia('${p.id}','${t.id}',this.checked)">
+  const feita = t.status === 'concluida';
+  return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-top:1px solid var(--gray-100);cursor:pointer;${feita?'background:var(--gray-50)':''}" onclick="abrirTarefa('${p.id}','${t.id}')">
+    <input type="checkbox" ${feita?'checked':''} style="margin-top:3px;flex-shrink:0" onclick="event.stopPropagation();toggleTaskMeuDia('${p.id}','${t.id}',this.checked)">
     <div style="flex:1;min-width:0">
-      <div style="font-size:13px;color:var(--gray-800);font-weight:500">${t.tarefa}</div>
+      <div style="font-size:13px;color:${feita?'var(--gray-400)':'var(--gray-800)'};font-weight:500;${feita?'text-decoration:line-through':''}">${t.tarefa}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:3px">
         <span style="font-size:11px;color:var(--accent);font-weight:600">${p.nome}</span>
         ${critico ? `<span class="badge badge-red" style="font-size:9px">projeto crítico</span>` : ''}
         ${ctx.blockers > 0 ? `<span style="font-size:10px;color:var(--danger)"><i class="ti ti-ban" style="font-size:10px"></i> impeditivo de Go-live</span>` : ''}
-        ${_mdChipPrazo(dl)}
-        ${extra || ''}
+        ${feita ? `<span class="badge badge-green" style="font-size:9px"><i class="ti ti-check" style="font-size:9px"></i> concluída hoje · desmarque para desfazer</span>` : _mdChipPrazo(dl) + (extra || '')}
       </div>
     </div>
   </div>`;
@@ -5697,12 +5735,13 @@ function toggleTaskMeuDia(pId, tId, checked) {
   const p = state.projetos.find(x => x.id === pId);
   const t = p?.tasks?.find(x => x.id === tId);
   if (!t) return;
-  t.status = checked ? 'concluida' : 'pendente';
+  aplicarStatusTarefa(t, checked ? 'concluida' : 'pendente');
   saveState();
   persistirTarefa(pId, t);
   renderMeuDia();
   renderSidebar();
   document.getElementById('nav-meu-dia')?.classList.add('active');
+  notificar(checked ? 'Tarefa concluída. Você pode desfazer aqui mesmo até o fim do dia.' : 'Tarefa reaberta.', 'sucesso');
 }
 
 function renderMeuDia() {
@@ -5711,7 +5750,7 @@ function renderMeuDia() {
   const page = document.getElementById('page-content');
   const primeiroNome = (state.currentUser?.name || '').split(' ')[0];
 
-  if (d.totalAberto === 0) {
+  if (d.totalAberto === 0 && !d.feitasHoje) {
     page.innerHTML = `<div class="card"><div class="empty"><i class="ti ti-checks"></i>
       <p>Nada em aberto para você agora</p><small>Todas as suas tarefas nos projetos ativos estão concluídas.</small></div></div>`;
     return;
@@ -5724,6 +5763,7 @@ function renderMeuDia() {
       ${d.destravar.length ? `<strong>${d.destravar.length}</strong> está(ão) parada(s) esperando alguém — comece cobrando, é o que mais destrava o dia. ` : ''}
       ${d.despachar.length ? `<strong>${d.despachar.length}</strong> depende(m) do cliente e ainda não foi(ram) enviada(s). ` : ''}
       ${d.foco.length ? `Depois disso, ataque as <strong>${d.foco.length}</strong> do bloco "Fazer agora".` : ''}
+      ${d.feitasHoje ? `<br><span style="color:var(--success);font-weight:600"><i class="ti ti-check" style="font-size:12px"></i> ${d.feitasHoje} concluída(s) hoje</span> <span style="color:var(--gray-400)">— continuam na lista até o fim do dia, caso precise desfazer.</span>` : ''}
     </div>
   </div>`;
 
@@ -6094,13 +6134,13 @@ function renderMinhasTarefasHierarquia(tabsHTML) {
 function toggleTaskMT(pId, tId, checked) {
   const p = state.projetos.find(x => x.id === pId);
   const t = p?.tasks?.find(x => x.id === tId);
-  if (t) { t.status = checked ? 'concluida' : 'pendente'; saveState(); persistirTarefa(pId, t); renderMinhasTarefas(); renderSidebar(); document.getElementById('nav-minhas-tarefas')?.classList.add('active'); }
+  if (t) { aplicarStatusTarefa(t, checked ? 'concluida' : 'pendente'); saveState(); persistirTarefa(pId, t); renderMinhasTarefas(); renderSidebar(); document.getElementById('nav-minhas-tarefas')?.classList.add('active'); }
 }
 
 function mudarStatusMT(pId, tId, status) {
   const p = state.projetos.find(x => x.id === pId);
   const t = p?.tasks?.find(x => x.id === tId);
-  if (t) { t.status = status; saveState(); persistirTarefa(pId, t); renderMinhasTarefas(); renderSidebar(); document.getElementById('nav-minhas-tarefas')?.classList.add('active'); }
+  if (t) { aplicarStatusTarefa(t, status); saveState(); persistirTarefa(pId, t); renderMinhasTarefas(); renderSidebar(); document.getElementById('nav-minhas-tarefas')?.classList.add('active'); }
 }
 
 // ==================== MINHAS TAREFAS — VISÃO POR VENCIMENTO ====================
@@ -6370,7 +6410,7 @@ function updateTaskStatusFromDueView(pId, tId, status) {
   const p = state.projetos.find(x => x.id === pId);
   const t = p?.tasks?.find(x => x.id === tId);
   if (!t) return;
-  t.status = status;
+  aplicarStatusTarefa(t, status);
   saveState();
   persistirTarefa(pId, t);
   renderMinhasTarefas();          // preserva state.mtView === 'vencimento' e os filtros
