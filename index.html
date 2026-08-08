@@ -602,7 +602,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-02-excluir-filtro';
+const DOS_BUILD = '2026-08-02-lixeira-visivel';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -4980,7 +4980,7 @@ function renderMacroDeliveryGroup(p, fase, d) {
     </div>
     ${aberto ? `<table style="width:100%">
       <thead><tr>
-        <th style="width:28px"></th><th>Tarefa</th><th>Responsável</th><th>Status</th><th>Prazo</th><th>Esforço</th><th style="width:60px"></th>
+        <th style="width:28px"></th><th>Tarefa</th><th>Responsável</th><th>Status</th><th>Prazo</th><th>Esforço</th><th style="width:118px"></th>
       </tr></thead>
       <tbody>${d.tasks.map(t => renderHierarchicalTaskRow(p, t)).join('')}</tbody>
     </table>` : ''}
@@ -5002,7 +5002,7 @@ function renderUnmappedGroup(p, fase, tasksUnmapped) {
     ${aberto ? `<div style="padding:0 4px 4px">
       <div style="font-size:11px;color:#92400e;padding:8px 12px">Estas tarefas ainda não estão associadas a uma macro entrega do cronograma.</div>
       <table style="width:100%">
-        <thead><tr><th style="width:28px"></th><th>Tarefa</th><th>Responsável</th><th>Status</th><th>Prazo</th><th>Esforço</th><th style="width:60px"></th></tr></thead>
+        <thead><tr><th style="width:28px"></th><th>Tarefa</th><th>Responsável</th><th>Status</th><th>Prazo</th><th>Esforço</th><th style="width:118px"></th></tr></thead>
         <tbody>${tasksUnmapped.map(t => renderHierarchicalTaskRow(p, t)).join('')}</tbody>
       </table>
     </div>` : ''}
@@ -5035,10 +5035,10 @@ function renderHierarchicalTaskRow(p, t) {
     <td style="font-size:12px;color:var(--gray-500)">${t.esforco||'—'}</td>
     <td>
       <div style="display:flex;align-items:center;gap:2px">
-        <select class="filter-select" style="border:none;background:transparent;font-size:11px;padding:2px 4px" onchange="mudarStatus('${p.id}','${t.id}',this.value)">
+        <select class="filter-select" style="border:none;background:transparent;font-size:11px;padding:2px 2px;max-width:76px" onchange="mudarStatus('${p.id}','${t.id}',this.value)">
           ${Object.entries(STATUS_MAP).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v.label}</option>`).join('')}
         </select>
-        ${isGestor() ? `<button class="btn btn-ghost btn-sm" style="padding:3px 5px;color:var(--danger)" title="Excluir tarefa deste projeto" onclick="excluirTarefaProjeto('${p.id}','${t.id}')"><i class="ti ti-trash"></i></button>` : ''}
+        ${isGestor() ? `<button class="btn btn-ghost btn-sm" style="padding:3px 5px;color:var(--danger);flex-shrink:0" title="Excluir tarefa deste projeto" onclick="excluirTarefaProjeto('${p.id}','${t.id}')"><i class="ti ti-trash"></i></button>` : ''}
       </div>
     </td>
   </tr>`;
