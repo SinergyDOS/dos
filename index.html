@@ -67,6 +67,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .btn-danger{background:var(--danger);color:#fff}.btn-danger:hover{opacity:.9}
 .btn-sm{padding:5px 10px;font-size:12px}
 .btn-ghost{background:transparent;color:var(--gray-500);padding:6px 8px}.btn-ghost:hover{background:var(--gray-100);color:var(--gray-700)}
+.btn-excluir{background:var(--danger-bg);color:var(--danger);border:1px solid #fca5a5;padding:4px 7px;line-height:1;flex-shrink:0}.btn-excluir i{color:var(--danger);font-size:14px;vertical-align:-1px}.btn-excluir:hover{background:var(--danger);color:#fff;border-color:var(--danger)}.btn-excluir:hover i{color:#fff}
 
 /* TABS */
 .tabs{display:flex;gap:2px;background:var(--gray-100);padding:3px;border-radius:var(--radius);width:fit-content}
@@ -602,7 +603,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-02-lixeira-visivel';
+const DOS_BUILD = '2026-08-02-lixeira-cor';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -5038,7 +5039,7 @@ function renderHierarchicalTaskRow(p, t) {
         <select class="filter-select" style="border:none;background:transparent;font-size:11px;padding:2px 2px;max-width:76px" onchange="mudarStatus('${p.id}','${t.id}',this.value)">
           ${Object.entries(STATUS_MAP).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v.label}</option>`).join('')}
         </select>
-        ${isGestor() ? `<button class="btn btn-ghost btn-sm" style="padding:3px 5px;color:var(--danger);flex-shrink:0" title="Excluir tarefa deste projeto" onclick="excluirTarefaProjeto('${p.id}','${t.id}')"><i class="ti ti-trash"></i></button>` : ''}
+        ${isGestor() ? `<button class="btn btn-sm btn-excluir" title="Excluir tarefa deste projeto" aria-label="Excluir tarefa" onclick="excluirTarefaProjeto('${p.id}','${t.id}')"><i class="ti ti-trash"></i></button>` : ''}
       </div>
     </td>
   </tr>`;
