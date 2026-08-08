@@ -69,6 +69,34 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .btn-ghost{background:transparent;color:var(--gray-500);padding:6px 8px}.btn-ghost:hover{background:var(--gray-100);color:var(--gray-700)}
 .btn-excluir{background:var(--danger-bg);color:var(--danger);border:1px solid #fca5a5;padding:4px 7px;line-height:1;flex-shrink:0}.btn-excluir i{color:var(--danger);font-size:14px;vertical-align:-1px}.btn-excluir:hover{background:var(--danger);color:#fff;border-color:var(--danger)}.btn-excluir:hover i{color:#fff}
 
+/* MEU DIA */
+.md-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--gray-200);border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.md-st{background:#fff;padding:10px 12px}
+.md-stn{font-size:20px;font-weight:700;line-height:1.1}
+.md-stl{font-size:11px;color:var(--gray-500);margin-top:1px}
+.md-pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:14px;align-items:start}
+.md-blk{background:#fff;border:1px solid var(--gray-200);border-left:3px solid var(--rail);border-radius:0 10px 10px 0;overflow:hidden;margin-bottom:14px}
+.md-bh{display:flex;align-items:baseline;gap:8px;padding:10px 13px 8px;background:var(--tint)}
+.md-bt{font-size:12.5px;font-weight:700;color:var(--rail)}
+.md-bs{font-size:10.5px;color:var(--gray-500);flex:1;line-height:1.3}
+.md-bn{font-size:12px;font-weight:700;color:var(--rail)}
+.md-scroll{overflow-y:auto;position:relative}
+.md-scroll::-webkit-scrollbar{width:7px}
+.md-scroll::-webkit-scrollbar-thumb{background:var(--gray-300);border-radius:4px}
+.md-fade{height:20px;margin-top:-20px;position:relative;background:linear-gradient(to bottom,rgba(255,255,255,0),#fff);pointer-events:none}
+.md-r{display:grid;grid-template-columns:18px 1fr auto;gap:9px;align-items:start;padding:10px 13px;border-top:1px solid var(--gray-100);cursor:pointer}
+.md-r:hover{background:var(--gray-50)}
+.md-tt{font-size:13px;font-weight:500;line-height:1.35;color:var(--gray-800)}
+.md-sub{font-size:11px;color:var(--gray-500);margin-top:2px}
+.md-obs{font-size:11px;color:var(--gray-400);margin-top:2px;font-style:italic}
+.md-u{text-align:right;min-width:62px}
+.md-un{font-size:14px;font-weight:700;line-height:1.1;white-space:nowrap}
+.md-ul{font-size:10.5px;color:var(--gray-400);margin-top:1px}
+.md-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--danger);margin-left:4px;vertical-align:1px}
+.md-foot{font-size:10.5px;color:var(--gray-400);padding:7px 13px;border-top:1px solid var(--gray-100);background:#fcfdfe}
+.md-done .md-tt{text-decoration:line-through;color:var(--gray-400);font-weight:400}
+.md-vazio{padding:14px 13px;font-size:12px;color:var(--gray-400)}
+
 /* TABS */
 .tabs{display:flex;gap:2px;background:var(--gray-100);padding:3px;border-radius:var(--radius);width:fit-content}
 .tab{padding:6px 14px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;color:var(--gray-600);transition:all .15s;border:none;background:transparent;display:flex;align-items:center;gap:6px}
@@ -603,7 +631,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-02-despachar-fix';
+const DOS_BUILD = '2026-08-03-meu-dia-v2';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -5697,51 +5725,70 @@ function montarMeuDia() {
   });
   despachar.sort(porScore);
   fazer.sort(porScore);
-  const foco = fazer.slice(0, 6);
-  const resto = fazer.slice(6, 16);
+  // "Fazer agora" = acionável agora (atrasada, sem prazo ou vencendo em até 15 dias).
+  // "No radar" = o que vem depois. Corte por horizonte, não por quantidade.
+  const HORIZONTE = 15;
+  const foco = fazer.filter(i => i.dl === null || i.dl <= HORIZONTE);
+  const resto = fazer.filter(i => i.dl !== null && i.dl > HORIZONTE);
   const emAberto = arr => arr.filter(i => i.t.status !== 'concluida').length;
   return { destravar, despachar, foco, radar: resto,
            totalAberto: emAberto(destravar) + emAberto(despachar) + emAberto(fazer),
            feitasHoje: [...destravar, ...despachar, ...fazer].filter(i => i.t.status === 'concluida').length };
 }
 
-function _mdChipPrazo(dl) {
-  if (dl === null) return `<span style="font-size:11px;color:var(--gray-400)">sem prazo</span>`;
-  if (dl < 0) return `<span style="font-size:11px;color:var(--danger);font-weight:700">${Math.abs(dl)}d de atraso</span>`;
-  if (dl === 0) return `<span style="font-size:11px;color:var(--warn);font-weight:700">vence hoje</span>`;
-  if (dl <= 7) return `<span style="font-size:11px;color:var(--warn);font-weight:600">vence em ${dl}d</span>`;
-  return `<span style="font-size:11px;color:var(--gray-500)">vence em ${dl}d</span>`;
+// Coluna de urgência à direita: um número e um rótulo, sempre na mesma posição.
+function _mdUrgencia(item, modo) {
+  const { t, dl } = item;
+  if (t.status === 'concluida') return { num:'—', lbl:'', cor:'var(--gray-300)' };
+  if (modo === 'parada') {
+    const dias = _mdDiasParado(t);
+    if (dias === null) return { num:'?', lbl:'sem data', cor:'var(--gray-400)' };
+    const cor = dias >= 7 ? 'var(--danger)' : dias >= 3 ? 'var(--warn)' : 'var(--gray-500)';
+    return { num: dias + 'd', lbl:'parada', cor };
+  }
+  if (dl === null) return { num:'—', lbl:'sem prazo', cor:'var(--gray-400)' };
+  if (dl < 0) return { num: Math.abs(dl) + 'd', lbl:'atrasada', cor:'var(--danger)' };
+  if (dl === 0) return { num:'hoje', lbl:'vence', cor:'var(--warn)' };
+  if (dl === 1) return { num:'1d', lbl:'vence em', cor:'var(--warn)' };
+  return { num: dl + 'd', lbl:'vence em', cor: dl <= 7 ? 'var(--warn)' : 'var(--gray-500)' };
 }
 
-function _mdLinha(item, extra) {
-  const { p, t, ctx, dl } = item;
-  const critico = ctx.status.key === 'critical';
+function _mdLinha(item, modo) {
+  const { p, t, ctx } = item;
   const feita = t.status === 'concluida';
-  return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-top:1px solid var(--gray-100);cursor:pointer;${feita?'background:var(--gray-50)':''}" onclick="abrirTarefa('${p.id}','${t.id}')">
-    <input type="checkbox" ${feita?'checked':''} style="margin-top:3px;flex-shrink:0" onclick="event.stopPropagation();toggleTaskMeuDia('${p.id}','${t.id}',this.checked)">
-    <div style="flex:1;min-width:0">
-      <div style="font-size:13px;color:${feita?'var(--gray-400)':'var(--gray-800)'};font-weight:500;${feita?'text-decoration:line-through':''}">${t.tarefa}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:3px">
-        <span style="font-size:11px;color:var(--accent);font-weight:600">${p.nome}</span>
-        ${critico ? `<span class="badge badge-red" style="font-size:9px">projeto crítico</span>` : ''}
-        ${ctx.blockers > 0 ? `<span style="font-size:10px;color:var(--danger)"><i class="ti ti-ban" style="font-size:10px"></i> impeditivo de Go-live</span>` : ''}
-        ${feita ? `<span class="badge badge-green" style="font-size:9px"><i class="ti ti-check" style="font-size:9px"></i> concluída hoje · desmarque para desfazer</span>` : _mdChipPrazo(dl) + (extra || '')}
-      </div>
-    </div>
+  const u = _mdUrgencia(item, modo);
+  // Um único sinal colorido por linha: ponto para projeto crítico ou com impeditivo
+  const alerta = (ctx.status.key === 'critical' || ctx.blockers > 0) && !feita;
+  let sub;
+  if (feita) {
+    sub = `<div class="md-sub" style="color:var(--success)">concluída hoje · desmarque para desfazer</div>`;
+  } else {
+    const origem = modo === 'parada' ? ` · ${t.bloqueioCom || 'origem não informada'}` : '';
+    sub = `<div class="md-sub">${p.nome}${origem}${alerta ? '<span class="md-dot" title="Projeto crítico ou com impeditivo de Go-live"></span>' : ''}</div>`;
+  }
+  const obs = (modo === 'parada' && t.bloqueioObs && !feita)
+    ? `<div class="md-obs">${t.bloqueioObs}</div>` : '';
+  return `<div class="md-r${feita?' md-done':''}" onclick="abrirTarefa('${p.id}','${t.id}')">
+    <input type="checkbox" ${feita?'checked':''} onclick="event.stopPropagation();toggleTaskMeuDia('${p.id}','${t.id}',this.checked)">
+    <div style="min-width:0"><div class="md-tt">${t.tarefa}</div>${sub}${obs}</div>
+    <div class="md-u"><div class="md-un" style="color:${u.cor}">${u.num}</div>${u.lbl?`<div class="md-ul">${u.lbl}</div>`:''}</div>
   </div>`;
 }
 
-function _mdBloco(titulo, icone, cor, descricao, itens, vazio) {
-  return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
-    <div style="padding:12px 14px;border-bottom:1px solid var(--gray-100)">
-      <div style="display:flex;align-items:center;gap:8px">
-        <i class="ti ${icone}" style="color:${cor};font-size:17px"></i>
-        <span style="font-size:14px;font-weight:700;color:var(--gray-800)">${titulo}</span>
-        <span class="badge" style="background:var(--gray-100);color:var(--gray-600);font-size:10px">${itens.length}</span>
-      </div>
-      <div style="font-size:11px;color:var(--gray-400);margin-top:2px;padding-left:25px">${descricao}</div>
-    </div>
-    ${itens.length ? itens.join('') : `<div style="padding:16px 14px;font-size:12px;color:var(--gray-400)">${vazio}</div>`}
+// Bloco com rolagem interna: a contagem do cabeçalho é sempre o TOTAL,
+// para que a rolagem não dê a impressão de esconder trabalho.
+function _mdBloco(opts) {
+  const { titulo, descricao, rail, tint, itens, modo, vazio, altura } = opts;
+  const linhas = itens.map(i => _mdLinha(i, modo)).join('');
+  // estimativa de altura por linha para saber se vai rolar (só afeta o rodapé/degradê)
+  const alturaEstim = itens.reduce((s,i) => s + (modo==='parada' && i.t.bloqueioObs ? 62 : 48), 0);
+  const rola = alturaEstim > altura;
+  return `<div class="md-blk" style="--rail:${rail};--tint:${tint}">
+    <div class="md-bh"><span class="md-bt">${titulo}</span><span class="md-bs">${descricao}</span><span class="md-bn">${itens.length}</span></div>
+    ${itens.length ? `<div class="md-scroll" style="max-height:${altura}px">${linhas}</div>
+      ${rola ? `<div class="md-fade"></div><div class="md-foot">${itens.length} no total · role para ver as demais</div>`
+             : `<div class="md-foot">${itens.length === 1 ? '1 item' : itens.length + ' itens'} · todos visíveis</div>`}`
+      : `<div class="md-vazio">${vazio}</div>`}
   </div>`;
 }
 
@@ -5762,7 +5809,6 @@ function renderMeuDia() {
   document.getElementById('topbar-actions').innerHTML = '';
   const d = montarMeuDia();
   const page = document.getElementById('page-content');
-  const primeiroNome = (state.currentUser?.name || '').split(' ')[0];
 
   if (d.totalAberto === 0 && !d.feitasHoje) {
     page.innerHTML = `<div class="card"><div class="empty"><i class="ti ti-checks"></i>
@@ -5770,48 +5816,37 @@ function renderMeuDia() {
     return;
   }
 
-  const resumo = `<div class="card" style="margin-bottom:16px;padding:14px 16px">
-    <div style="font-size:15px;font-weight:700;color:var(--gray-800);margin-bottom:4px">Bom trabalho, ${primeiroNome}</div>
-    <div style="font-size:12.5px;color:var(--gray-600);line-height:1.6">
-      Você tem <strong>${d.totalAberto}</strong> tarefa(s) em aberto.
-      ${d.destravar.length ? `<strong>${d.destravar.length}</strong> está(ão) parada(s) esperando alguém — comece cobrando, é o que mais destrava o dia. ` : ''}
-      ${d.despachar.length ? `<strong>${d.despachar.length}</strong> depende(m) do cliente e ainda não foi(ram) enviada(s). ` : ''}
-      ${d.foco.length ? `Depois disso, ataque as <strong>${d.foco.length}</strong> do bloco "Fazer agora".` : ''}
-      ${d.feitasHoje ? `<br><span style="color:var(--success);font-weight:600"><i class="ti ti-check" style="font-size:12px"></i> ${d.feitasHoje} concluída(s) hoje</span> <span style="color:var(--gray-400)">— continuam na lista até o fim do dia, caso precise desfazer.</span>` : ''}
+  const naoFeitas = arr => arr.filter(i => i.t.status !== 'concluida').length;
+  const strip = `<div class="md-strip">
+    <div class="md-st"><div class="md-stn" style="color:var(--warn)">${naoFeitas(d.destravar)}</div><div class="md-stl">esperando alguém</div></div>
+    <div class="md-st"><div class="md-stn" style="color:#2563eb">${naoFeitas(d.despachar)}</div><div class="md-stl">a despachar</div></div>
+    <div class="md-st"><div class="md-stn" style="color:var(--gray-800)">${naoFeitas(d.foco) + naoFeitas(d.radar)}</div><div class="md-stl">a executar</div></div>
+    <div class="md-st"><div class="md-stn" style="color:var(--success)">${d.feitasHoje}</div><div class="md-stl">${d.feitasHoje === 1 ? 'feita hoje' : 'feitas hoje'}</div></div>
+  </div>`;
+
+  const par = `<div class="md-pair">
+    ${_mdBloco({ titulo:'Destravar', descricao:'você cobra, não executa', rail:'#d97706', tint:'#fffbf3',
+                 itens:d.destravar, modo:'parada', altura:236, vazio:'Nada bloqueado. Ótimo sinal.' })}
+    ${_mdBloco({ titulo:'Despachar', descricao:'depende do cliente e não saiu', rail:'#2563eb', tint:'#f5f9ff',
+                 itens:d.despachar, modo:'prazo', altura:236, vazio:'Nada aguardando envio ao cliente.' })}
+  </div>`;
+
+  const fazer = _mdBloco({ titulo:'Fazer agora', descricao:'na ordem — atraso primeiro, depois risco',
+                           rail:'#16a34a', tint:'#f5fbf7', itens:d.foco, modo:'prazo', altura:290,
+                           vazio:'Sem tarefas de execução pendentes.' });
+
+  const radar = d.radar.length ? _mdBloco({ titulo:'No radar', descricao:'vem depois — só para não haver surpresa',
+                           rail:'#cbd5e1', tint:'#fafbfc', itens:d.radar, modo:'prazo', altura:150, vazio:'' }) : '';
+
+  const legenda = `<div style="display:flex;gap:5px;align-items:center;font-size:11px;color:var(--gray-400);padding:6px 2px 4px">
+      <span class="md-dot" style="margin:0 2px 0 0"></span> projeto crítico ou com impeditivo de Go-live
     </div>
-  </div>`;
+    <div style="font-size:11px;color:var(--gray-400);padding:0 2px 14px">
+      A ordem considera atraso, fase atual do projeto, proximidade do Go-live, impeditivos e a sequência do checklist.
+      É uma sugestão de foco — sua leitura do contexto continua valendo mais.
+    </div>`;
 
-  const bDestravar = _mdBloco('Destravar', 'ti-hand-stop', '#d97706',
-    'Parado esperando alguém. Não é execução sua — é cobrança.',
-    d.destravar.map(i => {
-      const dias = _mdDiasParado(i.t);
-      const com = i.t.bloqueioCom || 'origem não informada';
-      const obs = i.t.bloqueioObs ? ` — ${i.t.bloqueioObs}` : '';
-      const alerta = dias !== null && dias >= 7;
-      return _mdLinha(i, `<span style="font-size:11px;color:${alerta?'var(--danger)':'var(--gray-600)'};font-weight:${alerta?'700':'500'}"><i class="ti ti-user-exclamation" style="font-size:11px"></i> ${com}${dias!==null?` · parado há ${dias}d`:''}</span>${obs?`<span style="font-size:11px;color:var(--gray-400)">${obs}</span>`:''}`);
-    }),
-    'Nada bloqueado. Ótimo sinal.');
-
-  const bDespachar = _mdBloco('Despachar ao cliente', 'ti-send', '#2563eb',
-    'Depende do cliente. Cada dia parado aqui vira atraso multiplicado.',
-    d.despachar.map(i => _mdLinha(i, `<span style="font-size:11px;color:#2563eb;font-weight:600"><i class="ti ti-user" style="font-size:11px"></i> ${i.t.responsavel}</span>`)),
-    'Nada aguardando envio ao cliente.');
-
-  const bFazer = _mdBloco('Fazer agora', 'ti-player-play', '#16a34a',
-    'As mais importantes de hoje, já na ordem — atraso primeiro, depois risco.',
-    d.foco.map(i => _mdLinha(i)),
-    'Sem tarefas de execução pendentes.');
-
-  const bRadar = d.radar.length ? _mdBloco('No radar', 'ti-eye', '#64748b',
-    'Vem logo depois. Só para não haver surpresa.',
-    d.radar.map(i => _mdLinha(i)), '') : '';
-
-  const nota = `<div style="font-size:11px;color:var(--gray-400);padding:4px 2px 12px">
-    A ordem considera atraso, fase atual do projeto, proximidade do Go-live, impeditivos e a sequência do checklist.
-    É uma sugestão de foco — sua leitura do contexto continua valendo mais.
-  </div>`;
-
-  page.innerHTML = resumo + bDestravar + bDespachar + bFazer + bRadar + nota;
+  page.innerHTML = strip + par + fazer + radar + legenda;
 }
 
 // ==================== MINHAS TAREFAS (drill-down: Projeto → Fase → Tarefas) ====================
