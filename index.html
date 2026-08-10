@@ -631,7 +631,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-03-dia-equipe-b';
+const DOS_BUILD = '2026-08-03-filtro-cascata';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -5688,11 +5688,39 @@ function _mdDiasParado(t) {
 // Filtros da visão do gestor (projeto / consultor / analista)
 function normalizeMeuDiaFiltros() {
   if (!state.mdFiltros || typeof state.mdFiltros !== 'object') state.mdFiltros = {};
-  ['projeto','consultor','analista'].forEach(k => { if (typeof state.mdFiltros[k] !== 'string') state.mdFiltros[k] = ''; });
+  ['modulo','projeto','consultor','analista'].forEach(k => { if (typeof state.mdFiltros[k] !== 'string') state.mdFiltros[k] = ''; });
   return state.mdFiltros;
 }
-function setMeuDiaFiltro(k, v) { normalizeMeuDiaFiltros(); state.mdFiltros[k] = v || ''; renderMeuDia(); }
-function limparMeuDiaFiltros() { state.mdFiltros = { projeto:'', consultor:'', analista:'' }; renderMeuDia(); }
+function setMeuDiaFiltro(k, v) {
+  const f = normalizeMeuDiaFiltros();
+  f[k] = v || '';
+  // Ao trocar o módulo, o projeto selecionado pode não pertencer mais à lista.
+  if (k === 'modulo' && f.projeto) {
+    const aindaVale = _mdProjetosAbertos(f.modulo).some(p => p.id === f.projeto);
+    if (!aindaVale) f.projeto = '';
+  }
+  renderMeuDia();
+}
+function limparMeuDiaFiltros() { state.mdFiltros = { modulo:'', projeto:'', consultor:'', analista:'' }; renderMeuDia(); }
+
+// Projetos em aberto (não concluídos) que o usuário enxerga, ordenados por Go-live.
+// Alimenta o seletor de projeto — que muda conforme o módulo escolhido.
+function _mdProjetosAbertos(modulo) {
+  let lista = projetosVisiveis().filter(p => {
+    const prog = calculateProjectProgress(p);
+    return !(prog.totalTasks > 0 && prog.percent === 100);
+  });
+  if (modulo) lista = lista.filter(p => projectHasModule(p, modulo));
+  return lista.sort((a, b) => {
+    const da = a.goLive ? parseLocalDate(a.goLive) : null;
+    const db = b.goLive ? parseLocalDate(b.goLive) : null;
+    if (!da && !db) return (a.nome||'').localeCompare(b.nome||'');
+    if (!da) return 1;
+    if (!db) return -1;
+    if (da.getTime() !== db.getTime()) return da - db;
+    return (a.nome||'').localeCompare(b.nome||'');
+  });
+}
 
 // Quem responde por esta tarefa, resolvendo o papel para a pessoa do projeto.
 function _mdPessoaDaTarefa(p, t) {
@@ -5725,6 +5753,7 @@ function montarMeuDia() {
     return true;
   });
   if (gestor) {
+    if (f.modulo)    projetos = projetos.filter(p => projectHasModule(p, f.modulo));
     if (f.projeto)   projetos = projetos.filter(p => p.id === f.projeto);
     if (f.consultor) projetos = projetos.filter(p => normalizePersonName(p.consultor) === normalizePersonName(f.consultor));
     if (f.analista)  projetos = projetos.filter(p => normalizePersonName(p.analista) === normalizePersonName(f.analista));
@@ -5871,17 +5900,25 @@ function renderMeuDia() {
   let filtros = '';
   if (gestor) {
     const f = normalizeMeuDiaFiltros();
+    const abertos = _mdProjetosAbertos(f.modulo);      // já filtrados pelo módulo e ordenados por Go-live
     const todos = projetosVisiveis();
     const uniq = arr => [...new Set(arr.filter(Boolean).map(x => String(x).trim()))].sort((a,b)=>a.localeCompare(b));
     const consultores = uniq(todos.map(p => p.consultor));
     const analistas   = uniq(todos.map(p => p.analista));
-    const ativo = f.projeto || f.consultor || f.analista;
+    const ativo = f.modulo || f.projeto || f.consultor || f.analista;
     filtros = `<div class="card" style="margin-bottom:14px;padding:11px 14px">
       <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
         <span style="font-size:12px;font-weight:600;color:var(--gray-600)"><i class="ti ti-filter" style="font-size:14px;vertical-align:-2px"></i> Filtrar</span>
-        <select class="filter-select" onchange="setMeuDiaFiltro('projeto',this.value)">
-          <option value="">Todos os projetos</option>
-          ${todos.map(p=>`<option value="${p.id}" ${f.projeto===p.id?'selected':''}>${p.nome}</option>`).join('')}
+        <select class="filter-select" onchange="setMeuDiaFiltro('modulo',this.value)">
+          <option value="">Todos os módulos</option>
+          ${PROJECT_MODULE_OPTIONS.map(m => {
+            const n = _mdProjetosAbertos(m).length;
+            return `<option value="${m}" ${f.modulo===m?'selected':''}>${m} (${n})</option>`;
+          }).join('')}
+        </select>
+        <select class="filter-select" style="max-width:280px" onchange="setMeuDiaFiltro('projeto',this.value)">
+          <option value="">${f.modulo ? `Todos de ${f.modulo}` : 'Todos os projetos'} (${abertos.length})</option>
+          ${abertos.map(p=>`<option value="${p.id}" ${f.projeto===p.id?'selected':''}>${p.nome} — Go-live ${p.goLive ? fmt(p.goLive) : 'não definido'}</option>`).join('')}
         </select>
         <select class="filter-select" onchange="setMeuDiaFiltro('consultor',this.value)">
           <option value="">Todo consultor</option>
