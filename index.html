@@ -631,7 +631,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-03-meu-dia-v2';
+const DOS_BUILD = '2026-08-03-dia-equipe-b';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -1364,8 +1364,8 @@ function renderSidebar() {
     <div class="nav-section">Principal</div>
     <div class="nav-item" onclick="nav('dashboard')" id="nav-dashboard"><i class="ti ti-dashboard"></i> Dashboard</div>
     <div class="nav-item" onclick="nav('projetos')" id="nav-projetos"><i class="ti ti-folder"></i> Projetos</div>
+    <div class="nav-item" onclick="nav('meu-dia')" id="nav-meu-dia"><i class="ti ti-sun"></i> ${gestor ? 'Dia da equipe' : 'Meu dia'}</div>
     ${!gestor ? `
-    <div class="nav-item" onclick="nav('meu-dia')" id="nav-meu-dia"><i class="ti ti-sun"></i> Meu dia</div>
     <div class="nav-item" onclick="nav('minhas-tarefas')" id="nav-minhas-tarefas" style="justify-content:space-between">
       <span style="display:flex;align-items:center;gap:10px"><i class="ti ti-list-check"></i> Minhas tarefas</span>
       ${pendentes > 0 ? `<span style="background:var(--accent);color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:20px;min-width:18px;text-align:center">${pendentes}</span>` : ''}
@@ -1413,7 +1413,7 @@ function nav(page) {
   // Guard: apenas gestor acessa configuração
   if ((page === 'checklists' || page === 'usuarios' || page === 'matriz-alocacao') && !isGestor()) page = 'dashboard';
   // Guard: minhas tarefas só para não-gestores
-  if ((page === 'minhas-tarefas' || page === 'meu-dia') && isGestor()) page = 'dashboard';
+  if (page === 'minhas-tarefas' && isGestor()) page = 'dashboard';
   state.currentPage = page;
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('nav-'+page)?.classList.add('active');
@@ -1424,7 +1424,8 @@ function nav(page) {
     'matriz-alocacao': 'Matriz de alocação',
     checklists: 'Templates de Checklist', usuarios: 'Usuários'
   };
-  document.getElementById('page-title').textContent = titles[page] || page;
+  document.getElementById('page-title').textContent =
+    (page === 'meu-dia' && isGestor()) ? 'Dia da equipe' : (titles[page] || page);
   const pages = {
     dashboard: renderDashboard, projetos: renderProjetos,
     'meu-dia': renderMeuDia,
@@ -5684,9 +5685,38 @@ function _mdDiasParado(t) {
 }
 
 // Monta os quatro blocos do dia para o usuário logado
+// Filtros da visão do gestor (projeto / consultor / analista)
+function normalizeMeuDiaFiltros() {
+  if (!state.mdFiltros || typeof state.mdFiltros !== 'object') state.mdFiltros = {};
+  ['projeto','consultor','analista'].forEach(k => { if (typeof state.mdFiltros[k] !== 'string') state.mdFiltros[k] = ''; });
+  return state.mdFiltros;
+}
+function setMeuDiaFiltro(k, v) { normalizeMeuDiaFiltros(); state.mdFiltros[k] = v || ''; renderMeuDia(); }
+function limparMeuDiaFiltros() { state.mdFiltros = { projeto:'', consultor:'', analista:'' }; renderMeuDia(); }
+
+// Quem responde por esta tarefa, resolvendo o papel para a pessoa do projeto.
+function _mdPessoaDaTarefa(p, t) {
+  const partes = String(t.responsavel || '').split(';').map(x => x.trim()).filter(Boolean);
+  const daEquipe = partes.filter(x => x.toLowerCase() !== 'cliente');
+  // Tarefa só do cliente: quem o gestor cobra é quem toca o projeto.
+  if (!daEquipe.length) {
+    const dono = p.consultor || p.analista;
+    return dono ? `${dono} (cobrar cliente)` : 'Sem responsável definido';
+  }
+  const nomes = daEquipe.map(parte => {
+    const l = parte.toLowerCase();
+    if (l === 'consultor') return p.consultor || 'Consultor (não definido)';
+    if (l === 'analista') return p.analista || 'Analista (não definido)';
+    return parte;
+  });
+  return [...new Set(nomes)].join(' · ');
+}
+
 function montarMeuDia() {
+  const gestor = isGestor();
   const nome = state.currentUser?.name || '';
-  const projetos = projetosVisiveis().filter(p => {
+  const f = normalizeMeuDiaFiltros();
+  let projetos = projetosVisiveis().filter(p => {
     const prog = calculateProjectProgress(p);
     if (prog.totalTasks > 0 && prog.percent === 100) {
       // projeto concluído sai, salvo se houve baixa hoje (para poder desfazer)
@@ -5694,6 +5724,11 @@ function montarMeuDia() {
     }
     return true;
   });
+  if (gestor) {
+    if (f.projeto)   projetos = projetos.filter(p => p.id === f.projeto);
+    if (f.consultor) projetos = projetos.filter(p => normalizePersonName(p.consultor) === normalizePersonName(f.consultor));
+    if (f.analista)  projetos = projetos.filter(p => normalizePersonName(p.analista) === normalizePersonName(f.analista));
+  }
 
   const destravar = [], despachar = [], fazer = [], radar = [];
   projetos.forEach(p => {
@@ -5705,7 +5740,14 @@ function montarMeuDia() {
     (p.tasks || []).forEach(t => {
       // concluídas somem, exceto as de hoje (para permitir desfazer)
       if (t.status === 'concluida' && !tarefaConcluidaHoje(t)) return;
-      const destino = _mdClassificarTarefa(p, t, nome);
+      let destino;
+      if (gestor) {
+        // O gestor acompanha o trabalho da equipe inteira, não o próprio.
+        const partes = String(t.responsavel || '').split(';').map(x => x.trim().toLowerCase());
+        destino = partes.includes('cliente') ? 'despachar' : 'fazer';
+      } else {
+        destino = _mdClassificarTarefa(p, t, nome);
+      }
       if (!destino) return;
       const item = { p, t, ctx, score: _mdScoreTarefa(p, t, ctx), dl: t.prazo ? daysLeft(t.prazo) : null };
       if (t.status === 'bloqueada') { destravar.push(item); return; }
@@ -5731,7 +5773,7 @@ function montarMeuDia() {
   const foco = fazer.filter(i => i.dl === null || i.dl <= HORIZONTE);
   const resto = fazer.filter(i => i.dl !== null && i.dl > HORIZONTE);
   const emAberto = arr => arr.filter(i => i.t.status !== 'concluida').length;
-  return { destravar, despachar, foco, radar: resto,
+  return { destravar, despachar, foco, radar: resto, projetosNoRecorte: projetos.length,
            totalAberto: emAberto(destravar) + emAberto(despachar) + emAberto(fazer),
            feitasHoje: [...destravar, ...despachar, ...fazer].filter(i => i.t.status === 'concluida').length };
 }
@@ -5764,7 +5806,9 @@ function _mdLinha(item, modo) {
     sub = `<div class="md-sub" style="color:var(--success)">concluída hoje · desmarque para desfazer</div>`;
   } else {
     const origem = modo === 'parada' ? ` · ${t.bloqueioCom || 'origem não informada'}` : '';
-    sub = `<div class="md-sub">${p.nome}${origem}${alerta ? '<span class="md-dot" title="Projeto crítico ou com impeditivo de Go-live"></span>' : ''}</div>`;
+    // Na visão do gestor, quem responde pela tarefa é a informação que falta.
+    const quem = isGestor() ? ` · <span style="color:var(--gray-600);font-weight:500">${_mdPessoaDaTarefa(p, t)}</span>` : '';
+    sub = `<div class="md-sub">${p.nome}${quem}${origem}${alerta ? '<span class="md-dot" title="Projeto crítico ou com impeditivo de Go-live"></span>' : ''}</div>`;
   }
   const obs = (modo === 'parada' && t.bloqueioObs && !feita)
     ? `<div class="md-obs">${t.bloqueioObs}</div>` : '';
@@ -5811,12 +5855,47 @@ function renderMeuDia() {
   const page = document.getElementById('page-content');
 
   if (d.totalAberto === 0 && !d.feitasHoje) {
-    page.innerHTML = `<div class="card"><div class="empty"><i class="ti ti-checks"></i>
-      <p>Nada em aberto para você agora</p><small>Todas as suas tarefas nos projetos ativos estão concluídas.</small></div></div>`;
+    const f = normalizeMeuDiaFiltros();
+    const comFiltro = isGestor() && (f.projeto || f.consultor || f.analista);
+    page.innerHTML = `<div class="card"><div class="empty"><i class="ti ti-${comFiltro?'filter-off':'checks'}"></i>
+      <p>${comFiltro ? 'Nada em aberto neste recorte' : (isGestor() ? 'Nada em aberto na equipe agora' : 'Nada em aberto para você agora')}</p>
+      <small>${comFiltro ? '<button class="btn btn-secondary btn-sm" onclick="limparMeuDiaFiltros()"><i class="ti ti-x"></i> Limpar filtros</button>'
+                        : 'Todas as tarefas dos projetos ativos estão concluídas.'}</small></div></div>`;
     return;
   }
 
+  const gestor = isGestor();
   const naoFeitas = arr => arr.filter(i => i.t.status !== 'concluida').length;
+
+  // Barra de filtros (só faz sentido para quem enxerga vários projetos)
+  let filtros = '';
+  if (gestor) {
+    const f = normalizeMeuDiaFiltros();
+    const todos = projetosVisiveis();
+    const uniq = arr => [...new Set(arr.filter(Boolean).map(x => String(x).trim()))].sort((a,b)=>a.localeCompare(b));
+    const consultores = uniq(todos.map(p => p.consultor));
+    const analistas   = uniq(todos.map(p => p.analista));
+    const ativo = f.projeto || f.consultor || f.analista;
+    filtros = `<div class="card" style="margin-bottom:14px;padding:11px 14px">
+      <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:600;color:var(--gray-600)"><i class="ti ti-filter" style="font-size:14px;vertical-align:-2px"></i> Filtrar</span>
+        <select class="filter-select" onchange="setMeuDiaFiltro('projeto',this.value)">
+          <option value="">Todos os projetos</option>
+          ${todos.map(p=>`<option value="${p.id}" ${f.projeto===p.id?'selected':''}>${p.nome}</option>`).join('')}
+        </select>
+        <select class="filter-select" onchange="setMeuDiaFiltro('consultor',this.value)">
+          <option value="">Todo consultor</option>
+          ${consultores.map(c=>`<option value="${c.replace(/"/g,'&quot;')}" ${f.consultor===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+        <select class="filter-select" onchange="setMeuDiaFiltro('analista',this.value)">
+          <option value="">Todo analista</option>
+          ${analistas.map(a=>`<option value="${a.replace(/"/g,'&quot;')}" ${f.analista===a?'selected':''}>${a}</option>`).join('')}
+        </select>
+        ${ativo ? `<button class="btn btn-ghost btn-sm" onclick="limparMeuDiaFiltros()"><i class="ti ti-x"></i> Limpar</button>` : ''}
+        <span style="margin-left:auto;font-size:11.5px;color:var(--gray-400)">${d.projetosNoRecorte} projeto(s) no recorte</span>
+      </div>
+    </div>`;
+  }
   const strip = `<div class="md-strip">
     <div class="md-st"><div class="md-stn" style="color:var(--warn)">${naoFeitas(d.destravar)}</div><div class="md-stl">esperando alguém</div></div>
     <div class="md-st"><div class="md-stn" style="color:#2563eb">${naoFeitas(d.despachar)}</div><div class="md-stl">a despachar</div></div>
@@ -5825,13 +5904,13 @@ function renderMeuDia() {
   </div>`;
 
   const par = `<div class="md-pair">
-    ${_mdBloco({ titulo:'Destravar', descricao:'você cobra, não executa', rail:'#d97706', tint:'#fffbf3',
-                 itens:d.destravar, modo:'parada', altura:236, vazio:'Nada bloqueado. Ótimo sinal.' })}
-    ${_mdBloco({ titulo:'Despachar', descricao:'depende do cliente e não saiu', rail:'#2563eb', tint:'#f5f9ff',
-                 itens:d.despachar, modo:'prazo', altura:236, vazio:'Nada aguardando envio ao cliente.' })}
+    ${_mdBloco({ titulo:'Destravar', descricao: gestor ? 'parado esperando alguém — onde a equipe precisa de você' : 'você cobra, não executa',
+                 rail:'#d97706', tint:'#fffbf3', itens:d.destravar, modo:'parada', altura:236, vazio:'Nada bloqueado. Ótimo sinal.' })}
+    ${_mdBloco({ titulo:'Despachar', descricao: gestor ? 'depende do cliente e ainda não saiu' : 'depende do cliente e não saiu',
+                 rail:'#2563eb', tint:'#f5f9ff', itens:d.despachar, modo:'prazo', altura:236, vazio:'Nada aguardando envio ao cliente.' })}
   </div>`;
 
-  const fazer = _mdBloco({ titulo:'Fazer agora', descricao:'na ordem — atraso primeiro, depois risco',
+  const fazer = _mdBloco({ titulo: gestor ? 'Em execução' : 'Fazer agora', descricao:'na ordem — atraso primeiro, depois risco',
                            rail:'#16a34a', tint:'#f5fbf7', itens:d.foco, modo:'prazo', altura:290,
                            vazio:'Sem tarefas de execução pendentes.' });
 
@@ -5846,7 +5925,7 @@ function renderMeuDia() {
       É uma sugestão de foco — sua leitura do contexto continua valendo mais.
     </div>`;
 
-  page.innerHTML = strip + par + fazer + radar + legenda;
+  page.innerHTML = filtros + strip + par + fazer + radar + legenda;
 }
 
 // ==================== MINHAS TAREFAS (drill-down: Projeto → Fase → Tarefas) ====================
