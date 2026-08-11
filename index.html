@@ -631,7 +631,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-03-filtro-cascata';
+const DOS_BUILD = '2026-08-03-mod-customizacao';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -2796,7 +2796,7 @@ function renderProjetos() {
 }
 
 // ==================== MÓDULOS PADRONIZADOS DO PROJETO ====================
-const PROJECT_MODULE_OPTIONS = ["Folha", "GED", "Ponto", "Cargos e Salários", "Orçamento", "RH"];
+const PROJECT_MODULE_OPTIONS = ["Folha", "GED", "Ponto", "Cargos e Salários", "Orçamento", "RH", "Customização"];
 
 // Submódulos por módulo. Armazenados em project.modulos como "RH: <submódulo>".
 // No filtro do dashboard o pai aparece uma única vez e casa com qualquer submódulo.
@@ -2821,6 +2821,17 @@ const PROJECT_SUBMODULE_OPTIONS = {
     "Entrevista de desligamento",
     "Pesquisas, Enquetes e comunica Syn",
     "Integração com fornecedores terceiros"
+  ],
+  "Customização": [
+    "Integração financeira",
+    "Integração contábil",
+    "Integração bancária",
+    "Desenvolvimento de relatório",
+    "Desenvolvimento de cálculo",
+    "Outras integrações",
+    "Cópia de base",
+    "Transferência jurídica",
+    "Outras customizações"
   ]
 };
 const SUBMODULE_SEP = ': ';
@@ -2883,7 +2894,9 @@ function identifyStandardProjectModule(value) {
     'ponto': 'Ponto', 'ponto eletronico': 'Ponto', 'controle de ponto': 'Ponto',
     'cargos e salarios': 'Cargos e Salários', 'cargos': 'Cargos e Salários', 'plano de cargos': 'Cargos e Salários',
     'orcamento': 'Orçamento', 'budget': 'Orçamento',
-    'rh': 'RH', 'recursos humanos': 'RH'
+    'rh': 'RH', 'recursos humanos': 'RH',
+    'customizacao': 'Customização', 'customizacoes': 'Customização',
+    'customizado': 'Customização', 'customizados': 'Customização'
   };
   return MAP[n] || null;
 }
