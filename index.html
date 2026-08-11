@@ -577,6 +577,29 @@ const DEFAULT_DEPARA_TEMPLATE = [
   {macroKey:"ASSINATURA_DOS_CADERNOS",macroNameLabel:"Assinatura dos cadernos",checklistTaskIds:["ct213","ct214","ct215"]}
 ];
 
+// ── Checklist de projetos de Customização (fluxo de desenvolvimento) ──
+const DEFAULT_CHECKLIST_TASKS_CUSTOM = [
+  {fase:"Fase 1 - Mobilização e especificação",tema:"Geral",tarefa:"Elaborar cronograma de atividades do projeto",responsavel:"Gestor",esforco:"",help:""},
+  {fase:"Fase 1 - Mobilização e especificação",tema:"Geral",tarefa:"Enviar termo de abertura e realizar kickoff com o cliente",responsavel:"Gestor",esforco:"",help:""},
+  {fase:"Fase 1 - Mobilização e especificação",tema:"Geral",tarefa:"Especificar tecnicamente o desenvolvimento",responsavel:"Consultor",esforco:"",help:""},
+  {fase:"Fase 2 - Desenvolvimento",tema:"Geral",tarefa:"Realizar alinhamento da especificação",responsavel:"Consultor",esforco:"",help:""},
+  {fase:"Fase 2 - Desenvolvimento",tema:"Geral",tarefa:"Realizar desenvolvimento",responsavel:"Consultor",esforco:"",help:""},
+  {fase:"Fase 2 - Desenvolvimento",tema:"Geral",tarefa:"Realizar testes unitários",responsavel:"Consultor",esforco:"",help:""},
+  {fase:"Fase 2 - Desenvolvimento",tema:"Geral",tarefa:"Publicar em HML para testes de negócio",responsavel:"Consultor",esforco:"",help:""},
+  {fase:"Fase 3 - Testes e homologação",tema:"Geral",tarefa:"Realizar validação em ambiente de homologação",responsavel:"Consultor",esforco:"",help:""},
+  {fase:"Fase 3 - Testes e homologação",tema:"Geral",tarefa:"Aplicar em produção",responsavel:"Consultor",esforco:"",help:"",_goLiveMarker:true},
+  {fase:"Fase 3 - Testes e homologação",tema:"Geral",tarefa:"Realizar testes em conjunto com cliente",responsavel:"Consultor",esforco:"",help:""},
+  {fase:"Fase 4 - Operação assistida",tema:"Geral",tarefa:"Acompanhar projeto em operação assistida",responsavel:"Consultor",esforco:"",help:""},
+  {fase:"Fase 4 - Operação assistida",tema:"Geral",tarefa:"Realizar reunião de passagem de conhecimento para suporte",responsavel:"Consultor",esforco:"",help:""},
+  {fase:"Fase 4 - Operação assistida",tema:"Geral",tarefa:"Enviar termo de encerramento do projeto",responsavel:"Consultor",esforco:"",help:""}
+];
+const DEFAULT_DEPARA_TEMPLATE_CUSTOM = [
+  {macroKey:"MOBILIZACAO_E_ESPECIFICACAO",macroNameLabel:"Mobilização e especificação",checklistTaskIds:["ct0","ct1","ct2"]},
+  {macroKey:"DESENVOLVIMENTO",macroNameLabel:"Desenvolvimento",checklistTaskIds:["ct3","ct4","ct5","ct6"]},
+  {macroKey:"TESTES_E_HOMOLOGACAO",macroNameLabel:"Testes e homologação",checklistTaskIds:["ct7","ct8","ct9"]},
+  {macroKey:"OPERACAO_ASSISTIDA",macroNameLabel:"Operação assistida",checklistTaskIds:["ct10","ct11","ct12"]}
+];
+
 // ── Checklists específicos por escopo (projetos só de Ponto / só de RH) ──
 const DEFAULT_CHECKLIST_TASKS_PONTO = [
   {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Agendar reunião de levantamento",responsavel:"Consultor;Analista",esforco:"",help:""},
@@ -631,7 +654,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-04-follow-up';
+const DOS_BUILD = '2026-08-04-checklist-custom';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -704,7 +727,7 @@ function loadState() {
   // ── Template padrão de checklist ──────────────────────────────────────────
   // CHECKLIST_VERSION incrementa quando o checklist padrão muda. Usuários que já
   // têm o portal aberto recebem a versão nova automaticamente, SEM perder projetos.
-  const CHECKLIST_VERSION = 7;
+  const CHECKLIST_VERSION = 8;
   const buildDefaultTemplate = () => ({
     id: 'tpl1',
     nome: 'Checklist Padrão de Implantação',
@@ -731,10 +754,22 @@ function loadState() {
     tasks: [...DEFAULT_CHECKLIST_TASKS_RH, GOLIVE_MARKER_TASK].map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
     deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE_RH))
   });
+  // Customizações têm fluxo próprio (especificação → desenvolvimento → homologação),
+  // por isso não recebem a tarefa-marco genérica: quem confirma a virada aqui
+  // é "Aplicar em produção", já marcada como marco no próprio checklist.
+  const buildTemplateCustom = () => ({
+    id: 'tpl4',
+    nome: 'Checklist Customização',
+    descricao: 'Projetos de customização e desenvolvimento — 13 atividades, 4 fases',
+    versao: CHECKLIST_VERSION,
+    tasks: DEFAULT_CHECKLIST_TASKS_CUSTOM.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
+    deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE_CUSTOM))
+  });
   const CONSTRUTORES_TEMPLATE = [
     { id:'tpl1', build: buildDefaultTemplate },
     { id:'tpl2', build: buildTemplatePonto },
-    { id:'tpl3', build: buildTemplateRH }
+    { id:'tpl3', build: buildTemplateRH },
+    { id:'tpl4', build: buildTemplateCustom }
   ];
 
   if (!state.checklistTemplates || state.checklistTemplates.length === 0) {
@@ -950,6 +985,7 @@ function _mapTaskRow(r) {
     templateTaskId: r.template_task_id,
     macroActivityId: r.macro_activity_id,
     concluidaEm: r.concluida_em || null,
+    _goLiveMarker: r.go_live_marker === true,
     bloqueioCom: r.bloqueio_com || '',
     bloqueioDesde: r.bloqueio_desde || null,
     bloqueioObs: r.bloqueio_obs || '',
@@ -1171,6 +1207,7 @@ function _tarefaParaRow(t, projectId, ordem) {
     template_task_id: t.templateTaskId || null,
     macro_activity_id: t.macroActivityId || null,
     concluida_em: t.concluidaEm || null,
+    go_live_marker: t._goLiveMarker === true,
     bloqueio_com: t.bloqueioCom || null,
     bloqueio_desde: t.bloqueioDesde || null,
     bloqueio_obs: t.bloqueioObs || null,
@@ -1458,6 +1495,11 @@ const FASE_COLORS = {
   'Fase 3 - Paralelo Oficial': {bg:'#dcfce7',color:'#166534'},
   'Fase 4 - Treinamentos': {bg:'#fef3c7',color:'#92400e'},
   'Fase 5 - Go-Live': {bg:'#fee2e2',color:'#991b1b'},
+  // Fases do checklist de Customizações (fluxo próprio, não é implantação)
+  'Fase 1 - Mobilização e especificação': {bg:'#e0f2fe',color:'#075985'},
+  'Fase 2 - Desenvolvimento': {bg:'#ede9fe',color:'#5b21b6'},
+  'Fase 3 - Testes e homologação': {bg:'#fef9c3',color:'#854d0e'},
+  'Fase 4 - Operação assistida': {bg:'#dcfce7',color:'#14532d'},
 };
 const TEMA_COLORS = {
   'Folha':'#2e6ef7','Beneficios':'#16a34a','Contábil':'#7c3aed',
