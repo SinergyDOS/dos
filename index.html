@@ -101,8 +101,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .gt-scroll{overflow-x:auto;overflow-y:visible}
 .gt-scroll::-webkit-scrollbar{height:9px}
 .gt-scroll::-webkit-scrollbar-thumb{background:var(--gray-300);border-radius:5px}
-.gt-head{display:grid;grid-template-columns:340px var(--gt-tl,1fr);border-bottom:1px solid var(--gray-200);background:var(--gray-50);min-width:min-content}
-.gt-row{display:grid;grid-template-columns:340px var(--gt-tl,1fr);border-top:1px solid var(--gray-100);min-height:32px;min-width:min-content}
+.gt-head{display:grid;grid-template-columns:430px var(--gt-tl,1fr);border-bottom:1px solid var(--gray-200);background:var(--gray-50);min-width:min-content}
+.gt-row{display:grid;grid-template-columns:430px var(--gt-tl,1fr);border-top:1px solid var(--gray-100);min-height:32px;min-width:min-content}
 .gt-row:hover{background:var(--gray-50)}
 .gt-lf{display:flex;align-items:center;gap:6px;padding:6px 10px;min-width:0;position:sticky;left:0;z-index:3;background:inherit}
 .gt-head .gt-lf{background:var(--gray-50)}
@@ -669,7 +669,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-05-gantt-b';
+const DOS_BUILD = '2026-08-05-gantt-c';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -4069,7 +4069,7 @@ function renderCronogramaMacro(p) {
   const linhas = macrosOrdenadas.map(m => {
     if (m._cabecalhoFase) {
       const fc = FASE_COLORS[m._cabecalhoFase] || {bg:'var(--gray-100)',color:'var(--gray-600)'};
-      return `<tr><td colspan="9" style="background:${fc.bg};color:${fc.color};font-weight:700;font-size:12px;padding:6px 10px">${m._cabecalhoFase}</td></tr>`;
+      return `<tr><td colspan="7" style="background:${fc.bg};color:${fc.color};font-weight:700;font-size:12px;padding:6px 10px">${m._cabecalhoFase}</td></tr>`;
     }
     const nVinc = vinculadasPorMacro[m.id] || 0;
     const vincBadge = nVinc > 0
@@ -4078,10 +4078,9 @@ function renderCronogramaMacro(p) {
     const prog = typeof m.progress === 'number' ? m.progress : 0;
     const naoEncontrada = m.importStatus === 'not-found';
     return `<tr data-macro-row="${m.id}" style="${naoEncontrada?'background:#fef2f2':''}">
-      <td style="font-weight:500;color:var(--gray-800)">${m.name || '—'}
+      <td style="font-weight:500;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(m.name||'').replace(/"/g,'&quot;')}">${m.name || '—'}
         ${naoEncontrada ? `<span class="badge badge-red" style="font-size:9px;margin-left:4px" title="Não encontrada na última importação"><i class="ti ti-alert-triangle"></i>não encontrada</span>` : ''}
       </td>
-      <td style="font-size:12px;color:var(--gray-600)">${m.phase || '—'}</td>
       <td style="font-size:12px;color:${m.startDate?'var(--gray-600)':'var(--gray-300)'}">${m.startDate?fmt(m.startDate):'—'}</td>
       <td style="font-size:12px;color:${m.endDate?'var(--gray-600)':'var(--gray-300)'}">${m.endDate?fmt(m.endDate):'—'}</td>
       <td style="min-width:110px">
@@ -4092,7 +4091,6 @@ function renderCronogramaMacro(p) {
       </td>
       <td style="font-size:12px;color:var(--gray-600)">${m.responsible || '—'}</td>
       <td>${vincBadge}</td>
-      <td style="font-size:12px;color:var(--gray-500)">${m.importedAt ? new Date(m.importedAt).toLocaleDateString('pt-BR') : '—'}</td>
       <td style="white-space:nowrap">${isGestor() ? `<button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" title="Editar datas e replanejar as tarefas" onclick="modalEditarDatasMacro('${p.id}','${m.id}')"><i class="ti ti-calendar-event"></i> Datas</button>` : ''}</td>
     </tr>`;
   }).join('');
@@ -4121,15 +4119,13 @@ function renderCronogramaMacro(p) {
       <div class="table-wrap">
         <table style="width:100%">
           <thead><tr>
-            <th>Atividade</th>
-            <th>Fase</th>
-            <th>Início</th>
-            <th>Término</th>
-            <th>Progresso</th>
-            <th>Responsável</th>
-            <th>Situação da vinculação</th>
-            <th>Última atualização</th>
-            <th style="width:80px"></th>
+            <th style="width:30%">Atividade</th>
+            <th style="width:11%">Início</th>
+            <th style="width:11%">Término</th>
+            <th style="width:14%">Progresso</th>
+            <th style="width:14%">Responsável</th>
+            <th style="width:12%">Vinculação</th>
+            <th style="width:88px"></th>
           </tr></thead>
           <tbody>${linhas}</tbody>
         </table>
