@@ -98,12 +98,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .md-vazio{padding:14px 13px;font-size:12px;color:var(--gray-400)}
 
 /* GANTT */
-.gt-head{display:grid;grid-template-columns:270px 1fr;border-bottom:1px solid var(--gray-200);background:var(--gray-50)}
-.gt-row{display:grid;grid-template-columns:270px 1fr;border-top:1px solid var(--gray-100);min-height:30px}
+.gt-scroll{overflow-x:auto;overflow-y:visible}
+.gt-scroll::-webkit-scrollbar{height:9px}
+.gt-scroll::-webkit-scrollbar-thumb{background:var(--gray-300);border-radius:5px}
+.gt-head{display:grid;grid-template-columns:340px var(--gt-tl,1fr);border-bottom:1px solid var(--gray-200);background:var(--gray-50);min-width:min-content}
+.gt-row{display:grid;grid-template-columns:340px var(--gt-tl,1fr);border-top:1px solid var(--gray-100);min-height:32px;min-width:min-content}
 .gt-row:hover{background:var(--gray-50)}
-.gt-lf{display:flex;align-items:center;gap:6px;padding:5px 10px;min-width:0}
+.gt-lf{display:flex;align-items:center;gap:6px;padding:6px 10px;min-width:0;position:sticky;left:0;z-index:3;background:inherit}
+.gt-head .gt-lf{background:var(--gray-50)}
+.gt-row .gt-lf{background:#fff}
+.gt-row:hover .gt-lf{background:var(--gray-50)}
 .gt-nm{font-size:12.5px;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gt-dt{font-size:11px;color:var(--gray-400);margin-left:auto;white-space:nowrap}
+.gt-dt{font-size:11px;color:var(--gray-400);margin-left:auto;white-space:nowrap;flex-shrink:0}
 .gt-tl{position:relative;border-left:1px solid var(--gray-100)}
 
 /* TABS */
@@ -663,7 +669,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-05-gantt';
+const DOS_BUILD = '2026-08-05-gantt-b';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -3583,6 +3589,22 @@ function toggleGanttFase(fase) {
   renderProjetoDetail(state.projetos.find(x=>x.id===state.currentProjetoId));
 }
 
+// Ordena fases pelo número ("Fase 2 - X" vem depois de "Fase 1 - Y"), mesmo quando
+// o nome não é um dos oficiais — caso das fases vindas da importação do Planner.
+function _ordenarFases(lista) {
+  const oficiais = Object.keys(FASE_COLORS);
+  const numero = f => { const m = String(f||'').match(/fase\s*(\d+)/i); return m ? parseInt(m[1],10) : 999; };
+  return [...lista].sort((a,b) => {
+    const na = numero(a), nb = numero(b);
+    if (na !== nb) return na - nb;
+    const ia = oficiais.indexOf(a), ib = oficiais.indexOf(b);
+    if (ia !== -1 && ib !== -1 && ia !== ib) return ia - ib;
+    if (ia !== -1 && ib === -1) return -1;
+    if (ia === -1 && ib !== -1) return 1;
+    return String(a).localeCompare(String(b));
+  });
+}
+
 // Intervalo do gráfico: engloba as datas das macros e as do próprio projeto.
 function _ganttIntervalo(p, macros) {
   const datas = [];
@@ -3642,11 +3664,8 @@ function renderGanttCronograma(p, macros) {
   const pctHoje = (hoje >= intervalo.ini && hoje <= intervalo.fim) ? _ganttPct(hoje, intervalo) : null;
   const linhaHoje = pctHoje != null ? `<div style="position:absolute;top:0;bottom:0;left:${pctHoje}%;width:1px;background:var(--danger);z-index:2"></div>` : '';
 
-  // agrupa macros por fase, na ordem oficial
-  const ordem = Object.keys(FASE_COLORS);
-  const fases = [];
-  ordem.forEach(f => { if (macros.some(m => m.phase === f)) fases.push(f); });
-  macros.forEach(m => { const f = m.phase || 'Sem fase'; if (!fases.includes(f)) fases.push(f); });
+  // agrupa macros por fase, ordenadas pelo número da fase
+  const fases = _ordenarFases([...new Set(macros.map(m => m.phase || 'Sem fase'))]);
 
   const grupos = groupProjectTasksHierarchy(p, p.tasks || []);
   const statusPorMacro = {};
@@ -3656,7 +3675,13 @@ function renderGanttCronograma(p, macros) {
 
   const linhas = [];
   fases.forEach(fase => {
-    const doGrupo = macros.filter(m => (m.phase || 'Sem fase') === fase);
+    const doGrupo = macros.filter(m => (m.phase || 'Sem fase') === fase)
+      .sort((a,b) => {
+        const da = a.startDate || a.endDate || '9999-12-31';
+        const db = b.startDate || b.endDate || '9999-12-31';
+        if (da !== db) return da < db ? -1 : 1;
+        return (a.name||'').localeCompare(b.name||'');
+      });
     const datas = [];
     doGrupo.forEach(m => { const a=parseLocalDate(m.startDate), b=parseLocalDate(m.endDate); if(a)datas.push(a); if(b)datas.push(b); });
     const fc = FASE_COLORS[fase] || {bg:'#f1f5f9',color:'#475569'};
@@ -3699,14 +3724,19 @@ function renderGanttCronograma(p, macros) {
   });
 
   const totalCols = cols.length;
+  // largura mínima por coluna garante leitura; o conjunto rola na horizontal
+  const larguraCol = escala === 'semana' ? 52 : 96;
+  const larguraTL = Math.max(totalCols * larguraCol, 360);
   return `<div class="card" style="padding:0;overflow:hidden">
-    <div class="gt-head">
-      <div style="padding:6px 10px;font-size:11px;color:var(--gray-500)">Atividade</div>
-      <div style="display:grid;grid-template-columns:repeat(${totalCols},1fr)">
-        ${cols.map(c=>`<div style="font-size:11px;color:var(--gray-500);padding:6px 0 6px 5px;border-left:1px solid var(--gray-100);overflow:hidden;white-space:nowrap">${c.label}</div>`).join('')}
+    <div class="gt-scroll" style="--gt-tl:${larguraTL}px">
+      <div class="gt-head">
+        <div class="gt-lf" style="font-size:11px;color:var(--gray-500);padding:6px 10px">Atividade</div>
+        <div style="display:grid;grid-template-columns:repeat(${totalCols},1fr)">
+          ${cols.map(c=>`<div style="font-size:11px;color:var(--gray-500);padding:6px 0 6px 6px;border-left:1px solid var(--gray-100);overflow:hidden;white-space:nowrap">${c.label}</div>`).join('')}
+        </div>
       </div>
+      ${linhas.join('')}
     </div>
-    ${linhas.join('')}
   </div>
   <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:11px;color:var(--gray-400)">
     <span><span style="display:inline-block;width:14px;height:9px;border-radius:2px;background:var(--success);vertical-align:0"></span> concluída</span>
@@ -4021,7 +4051,26 @@ function renderCronogramaMacro(p) {
     if (t.macroActivityId) vinculadasPorMacro[t.macroActivityId] = (vinculadasPorMacro[t.macroActivityId] || 0) + 1;
   });
 
-  const linhas = macros.map(m => {
+  // Tabela agrupada por fase (na ordem correta) e, dentro dela, por data de início.
+  const fasesTab = _ordenarFases([...new Set(macros.map(m => m.phase || 'Sem fase'))]);
+  const macrosOrdenadas = [];
+  fasesTab.forEach(fase => {
+    macrosOrdenadas.push({ _cabecalhoFase: fase });
+    macros.filter(m => (m.phase || 'Sem fase') === fase)
+      .sort((a,b) => {
+        const da = a.startDate || a.endDate || '9999-12-31';
+        const db = b.startDate || b.endDate || '9999-12-31';
+        if (da !== db) return da < db ? -1 : 1;
+        return (a.name||'').localeCompare(b.name||'');
+      })
+      .forEach(m => macrosOrdenadas.push(m));
+  });
+
+  const linhas = macrosOrdenadas.map(m => {
+    if (m._cabecalhoFase) {
+      const fc = FASE_COLORS[m._cabecalhoFase] || {bg:'var(--gray-100)',color:'var(--gray-600)'};
+      return `<tr><td colspan="9" style="background:${fc.bg};color:${fc.color};font-weight:700;font-size:12px;padding:6px 10px">${m._cabecalhoFase}</td></tr>`;
+    }
     const nVinc = vinculadasPorMacro[m.id] || 0;
     const vincBadge = nVinc > 0
       ? `<span class="badge badge-green" style="font-size:10px"><i class="ti ti-link"></i>${nVinc} tarefa${nVinc>1?'s':''}</span>`
@@ -4044,7 +4093,7 @@ function renderCronogramaMacro(p) {
       <td style="font-size:12px;color:var(--gray-600)">${m.responsible || '—'}</td>
       <td>${vincBadge}</td>
       <td style="font-size:12px;color:var(--gray-500)">${m.importedAt ? new Date(m.importedAt).toLocaleDateString('pt-BR') : '—'}</td>
-      <td style="white-space:nowrap">${isGestor() ? `<button class="btn btn-ghost btn-sm" style="padding:3px 6px" title="Editar datas e replanejar as tarefas" onclick="modalEditarDatasMacro('${p.id}','${m.id}')"><i class="ti ti-calendar-event"></i></button>` : ''}</td>
+      <td style="white-space:nowrap">${isGestor() ? `<button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" title="Editar datas e replanejar as tarefas" onclick="modalEditarDatasMacro('${p.id}','${m.id}')"><i class="ti ti-calendar-event"></i> Datas</button>` : ''}</td>
     </tr>`;
   }).join('');
 
@@ -4080,7 +4129,7 @@ function renderCronogramaMacro(p) {
             <th>Responsável</th>
             <th>Situação da vinculação</th>
             <th>Última atualização</th>
-            <th style="width:52px"></th>
+            <th style="width:80px"></th>
           </tr></thead>
           <tbody>${linhas}</tbody>
         </table>
