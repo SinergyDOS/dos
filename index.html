@@ -669,7 +669,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-05-gantt-c';
+const DOS_BUILD = '2026-08-05-gantt-d';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -4083,14 +4083,14 @@ function renderCronogramaMacro(p) {
       </td>
       <td style="font-size:12px;color:${m.startDate?'var(--gray-600)':'var(--gray-300)'}">${m.startDate?fmt(m.startDate):'—'}</td>
       <td style="font-size:12px;color:${m.endDate?'var(--gray-600)':'var(--gray-300)'}">${m.endDate?fmt(m.endDate):'—'}</td>
-      <td style="min-width:110px">
+      <td>
         <div style="display:flex;align-items:center;gap:6px">
           <div class="progress" style="flex:1"><div class="progress-bar${prog===100?' green':''}" style="width:${prog}%"></div></div>
           <span style="font-size:11px;font-weight:600;color:var(--gray-600)">${prog}%</span>
         </div>
       </td>
-      <td style="font-size:12px;color:var(--gray-600)">${m.responsible || '—'}</td>
-      <td>${vincBadge}</td>
+      <td style="font-size:12px;color:var(--gray-600);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(m.responsible||'').replace(/"/g,'&quot;')}">${m.responsible || '—'}</td>
+      <td style="white-space:nowrap">${vincBadge}</td>
       <td style="white-space:nowrap">${isGestor() ? `<button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" title="Editar datas e replanejar as tarefas" onclick="modalEditarDatasMacro('${p.id}','${m.id}')"><i class="ti ti-calendar-event"></i> Datas</button>` : ''}</td>
     </tr>`;
   }).join('');
@@ -4117,15 +4117,15 @@ function renderCronogramaMacro(p) {
     ${state.ganttModo!=='tabela' ? renderGanttCronograma(p, macros) : `
     <div class="card" style="padding:0;overflow:hidden">
       <div class="table-wrap">
-        <table style="width:100%">
+        <table style="width:100%;table-layout:fixed;min-width:820px">
           <thead><tr>
-            <th style="width:30%">Atividade</th>
-            <th style="width:11%">Início</th>
-            <th style="width:11%">Término</th>
-            <th style="width:14%">Progresso</th>
-            <th style="width:14%">Responsável</th>
+            <th style="width:27%">Atividade</th>
+            <th style="width:10%">Início</th>
+            <th style="width:10%">Término</th>
+            <th style="width:15%">Progresso</th>
+            <th style="width:16%">Responsável</th>
             <th style="width:12%">Vinculação</th>
-            <th style="width:88px"></th>
+            <th style="width:10%"></th>
           </tr></thead>
           <tbody>${linhas}</tbody>
         </table>
