@@ -97,6 +97,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .md-done .md-tt{text-decoration:line-through;color:var(--gray-400);font-weight:400}
 .md-vazio{padding:14px 13px;font-size:12px;color:var(--gray-400)}
 
+/* GANTT */
+.gt-head{display:grid;grid-template-columns:270px 1fr;border-bottom:1px solid var(--gray-200);background:var(--gray-50)}
+.gt-row{display:grid;grid-template-columns:270px 1fr;border-top:1px solid var(--gray-100);min-height:30px}
+.gt-row:hover{background:var(--gray-50)}
+.gt-lf{display:flex;align-items:center;gap:6px;padding:5px 10px;min-width:0}
+.gt-nm{font-size:12.5px;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gt-dt{font-size:11px;color:var(--gray-400);margin-left:auto;white-space:nowrap}
+.gt-tl{position:relative;border-left:1px solid var(--gray-100)}
+
 /* TABS */
 .tabs{display:flex;gap:2px;background:var(--gray-100);padding:3px;border-radius:var(--radius);width:fit-content}
 .tab{padding:6px 14px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;color:var(--gray-600);transition:all .15s;border:none;background:transparent;display:flex;align-items:center;gap:6px}
@@ -654,7 +663,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-04-checklist-custom';
+const DOS_BUILD = '2026-08-05-gantt';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -3355,6 +3364,8 @@ async function salvarProjeto(editId) {
         consultor, analista, tasks, templateId: tplId || null,
         macroActivities: [], macroMappings: [], risks: [], criadoEm: new Date().toISOString()
       };
+      // O cronograma macro nasce do próprio checklist — sem depender de importação.
+      instanciarMacrosDoTemplate(novo, tpl);
       // Grava projeto + tarefas no banco PRIMEIRO.
       const res = await inserirProjetoSupabase(novo);
       if (!res.ok) {
@@ -3562,6 +3573,311 @@ function renderTaskView(p) {
 }
 
 
+
+
+// ==================== GANTT DO CRONOGRAMA MACRO ====================
+function setGanttEscala(e) { state.ganttEscala = e; renderProjetoDetail(state.projetos.find(x=>x.id===state.currentProjetoId)); }
+function toggleGanttFase(fase) {
+  if (!state.ganttFasesRecolhidas) state.ganttFasesRecolhidas = {};
+  state.ganttFasesRecolhidas[fase] = !state.ganttFasesRecolhidas[fase];
+  renderProjetoDetail(state.projetos.find(x=>x.id===state.currentProjetoId));
+}
+
+// Intervalo do gráfico: engloba as datas das macros e as do próprio projeto.
+function _ganttIntervalo(p, macros) {
+  const datas = [];
+  macros.forEach(m => { const a=parseLocalDate(m.startDate), b=parseLocalDate(m.endDate); if(a)datas.push(a); if(b)datas.push(b); });
+  const pi = parseLocalDate(p.dataInicio), pg = parseLocalDate(p.goLive);
+  if (pi) datas.push(pi); if (pg) datas.push(pg);
+  if (!datas.length) return null;
+  const min = new Date(Math.min(...datas.map(d=>d.getTime())));
+  const max = new Date(Math.max(...datas.map(d=>d.getTime())));
+  return { ini: new Date(min.getFullYear(), min.getMonth(), 1),
+           fim: new Date(max.getFullYear(), max.getMonth() + 1, 0) };
+}
+
+function _ganttColunas(intervalo, escala) {
+  const MES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const cols = [];
+  if (escala === 'semana') {
+    let c = new Date(intervalo.ini);
+    c.setDate(c.getDate() - ((c.getDay() + 6) % 7));   // segunda-feira
+    while (c <= intervalo.fim) {
+      cols.push({ label: `${String(c.getDate()).padStart(2,'0')}/${String(c.getMonth()+1).padStart(2,'0')}`, data: new Date(c) });
+      c.setDate(c.getDate() + 7);
+    }
+  } else {
+    let c = new Date(intervalo.ini);
+    while (c <= intervalo.fim) {
+      cols.push({ label: `${MES[c.getMonth()]}/${String(c.getFullYear()).slice(2)}`, data: new Date(c) });
+      c.setMonth(c.getMonth() + 1);
+    }
+  }
+  return cols;
+}
+
+function _ganttPct(data, intervalo) {
+  const t0 = intervalo.ini.getTime(), t1 = intervalo.fim.getTime();
+  return Math.max(0, Math.min(100, ((data.getTime() - t0) / (t1 - t0)) * 100));
+}
+
+function _ganttBarra(ini, fim, intervalo, cor, corFundo, preench) {
+  const a = _ganttPct(ini, intervalo), b = _ganttPct(fim, intervalo);
+  const largura = Math.max(0.8, b - a);
+  const fill = preench != null ? `<div style="height:100%;width:${preench}%;background:${cor};border-radius:3px 0 0 3px"></div>` : '';
+  return `<div style="position:absolute;top:8px;left:${a}%;width:${largura}%;height:13px;background:${corFundo};border-radius:3px;overflow:hidden">${fill}</div>`;
+}
+
+function renderGanttCronograma(p, macros) {
+  const intervalo = _ganttIntervalo(p, macros);
+  if (!intervalo) {
+    return `<div class="card"><div class="empty"><i class="ti ti-calendar-off"></i>
+      <p>Nenhuma data definida ainda</p>
+      <small>Informe início e término das atividades macro para ver o cronograma.</small></div></div>`;
+  }
+  const escala = state.ganttEscala === 'semana' ? 'semana' : 'mes';
+  const cols = _ganttColunas(intervalo, escala);
+  const recolhidas = state.ganttFasesRecolhidas || {};
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const pctHoje = (hoje >= intervalo.ini && hoje <= intervalo.fim) ? _ganttPct(hoje, intervalo) : null;
+  const linhaHoje = pctHoje != null ? `<div style="position:absolute;top:0;bottom:0;left:${pctHoje}%;width:1px;background:var(--danger);z-index:2"></div>` : '';
+
+  // agrupa macros por fase, na ordem oficial
+  const ordem = Object.keys(FASE_COLORS);
+  const fases = [];
+  ordem.forEach(f => { if (macros.some(m => m.phase === f)) fases.push(f); });
+  macros.forEach(m => { const f = m.phase || 'Sem fase'; if (!fases.includes(f)) fases.push(f); });
+
+  const grupos = groupProjectTasksHierarchy(p, p.tasks || []);
+  const statusPorMacro = {};
+  grupos.forEach(g => g.macroDeliveries.forEach(dd => {
+    if (dd.macroActivity) statusPorMacro[dd.macroActivity.id] = dd;
+  }));
+
+  const linhas = [];
+  fases.forEach(fase => {
+    const doGrupo = macros.filter(m => (m.phase || 'Sem fase') === fase);
+    const datas = [];
+    doGrupo.forEach(m => { const a=parseLocalDate(m.startDate), b=parseLocalDate(m.endDate); if(a)datas.push(a); if(b)datas.push(b); });
+    const fc = FASE_COLORS[fase] || {bg:'#f1f5f9',color:'#475569'};
+    // progresso da fase = microtarefas das macros dela
+    let tot=0, conc=0;
+    doGrupo.forEach(m => { const dd=statusPorMacro[m.id]; if(dd){ tot+=dd.progress.totalTasks; conc+=dd.progress.completedTasks; } });
+    const pctFase = tot ? Math.round(conc/tot*100) : 0;
+    const barraFase = datas.length >= 2
+      ? _ganttBarra(new Date(Math.min(...datas.map(d=>d.getTime()))), new Date(Math.max(...datas.map(d=>d.getTime()))), intervalo, fc.color, fc.bg, pctFase)
+      : '';
+    const recolhida = recolhidas[fase] === true;
+    linhas.push(`<div class="gt-row" onclick="toggleGanttFase('${fase.replace(/'/g,"\\'")}')" style="cursor:pointer">
+      <div class="gt-lf"><i class="ti ti-chevron-${recolhida?'right':'down'}" style="font-size:14px;color:var(--gray-400)"></i>
+        <span class="gt-nm" style="font-weight:600">${fase}</span>
+        <span class="gt-dt">${pctFase}%</span></div>
+      <div class="gt-tl">${barraFase}${linhaHoje}</div>
+    </div>`);
+    if (recolhida) return;
+    doGrupo.forEach(m => {
+      const a = parseLocalDate(m.startDate), b = parseLocalDate(m.endDate);
+      const dd = statusPorMacro[m.id];
+      const pct = dd && dd.progress.microProgress != null ? dd.progress.microProgress : 0;
+      const atrasada = dd && dd.status.key === 'atrasada';
+      const concluida = dd && dd.status.key === 'concluida';
+      const corBarra = concluida ? 'var(--success)' : atrasada ? 'var(--danger)' : fc.color;
+      let barra = '';
+      if (a && b) barra = _ganttBarra(a, b, intervalo, corBarra, fc.bg, pct);
+      else if (b) barra = `<div style="position:absolute;top:9px;left:${_ganttPct(b,intervalo)}%;width:11px;height:11px;transform:translateX(-50%) rotate(45deg);background:${corBarra};border-radius:1px"></div>`;
+      const semData = !a && !b;
+      const nTar = dd ? dd.progress.totalTasks : 0;
+      linhas.push(`<div class="gt-row" ${isGestor()?`onclick="modalEditarDatasMacro('${p.id}','${m.id}')" style="cursor:pointer" title="Editar datas e replanejar as tarefas"`:''}>
+        <div class="gt-lf" style="padding-left:26px">
+          <span class="gt-nm">${m.name || '—'}</span>
+          ${semData ? '<span class="badge badge-gray" style="font-size:9px">sem data</span>' : ''}
+          <span class="gt-dt">${nTar} tar. · ${pct}%</span>
+        </div>
+        <div class="gt-tl">${barra}${linhaHoje}</div>
+      </div>`);
+    });
+  });
+
+  const totalCols = cols.length;
+  return `<div class="card" style="padding:0;overflow:hidden">
+    <div class="gt-head">
+      <div style="padding:6px 10px;font-size:11px;color:var(--gray-500)">Atividade</div>
+      <div style="display:grid;grid-template-columns:repeat(${totalCols},1fr)">
+        ${cols.map(c=>`<div style="font-size:11px;color:var(--gray-500);padding:6px 0 6px 5px;border-left:1px solid var(--gray-100);overflow:hidden;white-space:nowrap">${c.label}</div>`).join('')}
+      </div>
+    </div>
+    ${linhas.join('')}
+  </div>
+  <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:11px;color:var(--gray-400)">
+    <span><span style="display:inline-block;width:14px;height:9px;border-radius:2px;background:var(--success);vertical-align:0"></span> concluída</span>
+    <span><span style="display:inline-block;width:14px;height:9px;border-radius:2px;background:var(--danger);vertical-align:0"></span> atrasada</span>
+    <span><span style="display:inline-block;width:2px;height:11px;background:var(--danger);vertical-align:-1px"></span> hoje</span>
+    <span>O preenchimento da barra é o percentual de microtarefas concluídas.</span>
+  </div>`;
+}
+
+// ==================== EDIÇÃO DE DATAS DA MACRO ATIVIDADE ====================
+// Com o cronograma editável no DOS, a importação deixa de ser o único caminho.
+// A regra de propagação é a MESMA da importação: só mexe em tarefa não concluída
+// e sem prazo definido manualmente.
+
+// Simula o efeito de uma nova data de término, sem alterar nada.
+function simularImpactoPrazo(p, macro, novoFim) {
+  const res = { alteradas: [], concluidas: 0, manuais: 0, semMudanca: 0, total: 0 };
+  const mp = (p.macroMappings || []).find(m => m.macroActivityId === macro.id);
+  const ids = mp ? (mp.microTaskIds || []) : [];
+  ids.forEach(tid => {
+    const t = (p.tasks || []).find(x => x.id === tid);
+    if (!t) return;
+    res.total++;
+    if (t.status === 'concluida') { res.concluidas++; return; }
+    if (t._prazoManual) { res.manuais++; return; }
+    if (t.prazo === novoFim) { res.semMudanca++; return; }
+    res.alteradas.push({ tarefa: t.tarefa, de: t.prazo, para: novoFim });
+  });
+  return res;
+}
+
+function modalEditarDatasMacro(pId, macroId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode alterar o cronograma.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  const m = (p?.macroActivities || []).find(x => x.id === macroId);
+  if (!p || !m) return;
+  const mp = (p.macroMappings || []).find(x => x.macroActivityId === m.id);
+  const nVinc = mp ? (mp.microTaskIds || []).length : 0;
+
+  openModal(`<div class="modal-header">
+    <div class="modal-title"><i class="ti ti-calendar-event" style="margin-right:8px;color:var(--accent)"></i>Datas — ${m.name || 'Atividade macro'}</div>
+    <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="modal-body">
+    <div style="font-size:12px;color:var(--gray-500);margin-bottom:14px">
+      ${m.phase || 'Sem fase'} · ${nVinc} tarefa(s) vinculada(s)
+    </div>
+    <div id="emAlert" class="form-alert" style="display:none"><i class="ti ti-alert-circle" style="font-size:15px"></i><span id="emAlertMsg"></span></div>
+    <div class="form-grid">
+      <div class="form-group"><label class="form-label">Início</label>
+        <input type="date" class="form-input" id="emInicio" value="${m.startDate || ''}" onchange="previewImpactoMacro('${pId}','${macroId}')"></div>
+      <div class="form-group"><label class="form-label">Término</label>
+        <input type="date" class="form-input" id="emFim" value="${m.endDate || ''}" onchange="previewImpactoMacro('${pId}','${macroId}')"></div>
+    </div>
+    <div id="emPreview"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" id="emBtnSalvar" onclick="salvarDatasMacro('${pId}','${macroId}')"><i class="ti ti-check"></i> Salvar e replanejar</button>
+  </div>`);
+  previewImpactoMacro(pId, macroId);
+}
+
+// Mostra ANTES de salvar quantas tarefas serão afetadas — sem isso o gestor
+// não tem como saber o tamanho do que está prestes a fazer.
+function previewImpactoMacro(pId, macroId) {
+  const p = state.projetos.find(x => x.id === pId);
+  const m = (p?.macroActivities || []).find(x => x.id === macroId);
+  const box = document.getElementById('emPreview');
+  if (!p || !m || !box) return;
+  const novoFim = document.getElementById('emFim')?.value || null;
+  if (!novoFim) {
+    box.innerHTML = `<div style="font-size:12px;color:var(--gray-400);background:var(--gray-50);border-radius:8px;padding:11px 13px">
+      Sem data de término, os prazos das tarefas não são alterados.</div>`;
+    return;
+  }
+  const s = simularImpactoPrazo(p, m, novoFim);
+  const linhas = s.alteradas.slice(0, 6).map(a =>
+    `<div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:3px 0;border-top:1px solid var(--gray-100)">
+      <span style="color:var(--gray-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.tarefa}</span>
+      <span style="color:var(--gray-500);white-space:nowrap">${a.de ? fmt(a.de) : 'sem prazo'} → <strong style="color:var(--accent)">${fmt(a.para)}</strong></span>
+    </div>`).join('');
+  box.innerHTML = `<div style="background:var(--gray-50);border-radius:8px;padding:11px 13px;margin-top:4px">
+    <div style="font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:6px">
+      <i class="ti ti-arrow-bounce" style="font-size:13px;vertical-align:-2px"></i> Impacto nas tarefas
+    </div>
+    <div style="font-size:12px;color:var(--gray-600);line-height:1.7">
+      <strong style="color:var(--accent)">${s.alteradas.length}</strong> terão o prazo alterado para ${fmt(novoFim)}.
+      ${s.concluidas ? `<br>${s.concluidas} já concluída(s) — não serão tocadas.` : ''}
+      ${s.manuais ? `<br>${s.manuais} com prazo manual — preservada(s).` : ''}
+      ${s.semMudanca ? `<br>${s.semMudanca} já está(ão) nesta data.` : ''}
+      ${s.total === 0 ? 'Nenhuma tarefa vinculada a esta atividade.' : ''}
+    </div>
+    ${linhas ? `<div style="margin-top:8px">${linhas}${s.alteradas.length > 6 ? `<div style="font-size:11px;color:var(--gray-400);padding-top:5px">e mais ${s.alteradas.length - 6}...</div>` : ''}</div>` : ''}
+  </div>`;
+}
+
+async function salvarDatasMacro(pId, macroId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode alterar o cronograma.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  const m = (p?.macroActivities || []).find(x => x.id === macroId);
+  if (!p || !m) return;
+  const el = id => document.getElementById(id);
+  const erro = msg => { const a=el('emAlert'), b=el('emAlertMsg'); if(a&&b){ b.textContent=msg; a.style.display='flex'; } };
+  if (el('emAlert')) el('emAlert').style.display = 'none';
+
+  const ini = el('emInicio')?.value || null;
+  const fim = el('emFim')?.value || null;
+  if (ini && fim && fim < ini) { erro('O término não pode ser anterior ao início.'); return; }
+
+  const btn = el('emBtnSalvar');
+  const lbl = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Salvando...'; }
+
+  const antes = { startDate: m.startDate, endDate: m.endDate };
+  m.startDate = ini;
+  m.endDate = fim;
+  m.source = m.source === 'planner-import' ? 'planner-import' : 'dos';
+  m.lastUpdatedAt = new Date().toISOString();
+  const atualizadas = propagarPrazosMacro(p);
+
+  const res = await persistirCronograma(p);
+  if (!res.ok) {
+    m.startDate = antes.startDate; m.endDate = antes.endDate;   // desfaz na tela
+    propagarPrazosMacro(p);
+    if (btn) { btn.disabled = false; btn.innerHTML = lbl; }
+    erro('Não foi possível salvar: ' + res.error);
+    return;
+  }
+  saveState();
+  closeModal();
+  renderProjetoDetail(p);
+  notificar(atualizadas
+    ? `Datas atualizadas. ${atualizadas} prazo(s) de tarefa replanejado(s).`
+    : 'Datas atualizadas.', 'sucesso');
+}
+
+// Instancia as macro atividades a partir do DE-PARA do template, na criação do
+// projeto. É o que substitui a importação: a estrutura nasce do próprio checklist.
+function instanciarMacrosDoTemplate(projeto, tpl) {
+  if (!tpl || !Array.isArray(tpl.deParaTemplate) || !tpl.deParaTemplate.length) return;
+  const agora = new Date().toISOString();
+  const porTemplateTask = {};
+  (projeto.tasks || []).forEach(t => { if (t.templateTaskId) porTemplateTask[t.templateTaskId] = t; });
+
+  projeto.macroActivities = [];
+  projeto.macroMappings = [];
+  tpl.deParaTemplate.forEach(entrada => {
+    const tarefas = (entrada.checklistTaskIds || []).map(ct => porTemplateTask[ct]).filter(Boolean);
+    if (!tarefas.length) return;
+    // a fase da macro vem das tarefas que ela agrupa
+    const fase = tarefas[0].fase || null;
+    const macroId = uid();
+    projeto.macroActivities.push({
+      id: macroId, externalId: null, hierarchyCode: null,
+      macroKey: entrada.macroKey, name: entrada.macroNameLabel,
+      phase: fase, startDate: null, endDate: null,
+      progress: null, responsible: null, bucket: null,
+      source: 'template', importStatus: 'ok',
+      importedAt: agora, lastUpdatedAt: agora
+    });
+    projeto.macroMappings.push({
+      id: uid(), macroKey: entrada.macroKey, macroActivityId: macroId,
+      macroExternalId: null, macroNameSnapshot: entrada.macroNameLabel,
+      microTaskIds: tarefas.map(t => t.id),
+      origem: 'template', createdAt: agora, updatedAt: agora
+    });
+    tarefas.forEach(t => { t.macroActivityId = macroId; });
+  });
+}
+
 // ==================== FOLLOW UP ====================
 // Histórico de alinhamentos do projeto. Cada registro é datado e imutável —
 // serve como memória do que foi combinado com o time, consultável depois.
@@ -3717,8 +4033,8 @@ function renderCronogramaMacro(p) {
         ${naoEncontrada ? `<span class="badge badge-red" style="font-size:9px;margin-left:4px" title="Não encontrada na última importação"><i class="ti ti-alert-triangle"></i>não encontrada</span>` : ''}
       </td>
       <td style="font-size:12px;color:var(--gray-600)">${m.phase || '—'}</td>
-      <td style="font-size:12px;color:var(--gray-500)">${fmt(m.startDate)}</td>
-      <td style="font-size:12px;color:var(--gray-500)">${fmt(m.endDate)}</td>
+      <td style="font-size:12px;color:${m.startDate?'var(--gray-600)':'var(--gray-300)'}">${m.startDate?fmt(m.startDate):'—'}</td>
+      <td style="font-size:12px;color:${m.endDate?'var(--gray-600)':'var(--gray-300)'}">${m.endDate?fmt(m.endDate):'—'}</td>
       <td style="min-width:110px">
         <div style="display:flex;align-items:center;gap:6px">
           <div class="progress" style="flex:1"><div class="progress-bar${prog===100?' green':''}" style="width:${prog}%"></div></div>
@@ -3728,18 +4044,30 @@ function renderCronogramaMacro(p) {
       <td style="font-size:12px;color:var(--gray-600)">${m.responsible || '—'}</td>
       <td>${vincBadge}</td>
       <td style="font-size:12px;color:var(--gray-500)">${m.importedAt ? new Date(m.importedAt).toLocaleDateString('pt-BR') : '—'}</td>
+      <td style="white-space:nowrap">${isGestor() ? `<button class="btn btn-ghost btn-sm" style="padding:3px 6px" title="Editar datas e replanejar as tarefas" onclick="modalEditarDatasMacro('${p.id}','${m.id}')"><i class="ti ti-calendar-event"></i></button>` : ''}</td>
     </tr>`;
   }).join('');
 
   container.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div style="font-size:13px;color:var(--gray-500)">${macros.length} atividade${macros.length>1?'s':''} macro no cronograma</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="tabs" style="padding:2px">
+          <button class="tab ${state.ganttModo!=='tabela'?'active':''}" style="padding:5px 10px;font-size:12px" onclick="state.ganttModo='gantt';renderProjetoDetail(state.projetos.find(x=>x.id==='${p.id}'))"><i class="ti ti-chart-bar"></i> Gantt</button>
+          <button class="tab ${state.ganttModo==='tabela'?'active':''}" style="padding:5px 10px;font-size:12px" onclick="state.ganttModo='tabela';renderProjetoDetail(state.projetos.find(x=>x.id==='${p.id}'))"><i class="ti ti-table"></i> Tabela</button>
+        </div>
+        ${state.ganttModo!=='tabela' ? `<div class="tabs" style="padding:2px">
+          <button class="tab ${state.ganttEscala!=='semana'?'active':''}" style="padding:5px 10px;font-size:12px" onclick="setGanttEscala('mes')">Mês</button>
+          <button class="tab ${state.ganttEscala==='semana'?'active':''}" style="padding:5px 10px;font-size:12px" onclick="setGanttEscala('semana')">Semana</button>
+        </div>` : ''}
+        <span style="font-size:12px;color:var(--gray-400)">${macros.length} atividade${macros.length>1?'s':''}${isGestor()?' · clique numa atividade para ajustar datas':''}</span>
+      </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-secondary btn-sm" onclick="modalConfigurarDePara('${p.id}')"><i class="ti ti-arrows-exchange"></i> Configurar DE-PARA</button>
         <button class="btn btn-secondary btn-sm" onclick="modalImportarCronograma('${p.id}')"><i class="ti ti-upload"></i> Importar cronograma</button>
         <button class="btn btn-secondary btn-sm" style="color:var(--danger)" onclick="limparCronogramaMacro('${p.id}')"><i class="ti ti-trash"></i> Limpar cronograma</button>
       </div>
     </div>
+    ${state.ganttModo!=='tabela' ? renderGanttCronograma(p, macros) : `
     <div class="card" style="padding:0;overflow:hidden">
       <div class="table-wrap">
         <table style="width:100%">
@@ -3751,12 +4079,13 @@ function renderCronogramaMacro(p) {
             <th>Progresso</th>
             <th>Responsável</th>
             <th>Situação da vinculação</th>
-            <th>Última importação</th>
+            <th>Última atualização</th>
+            <th style="width:52px"></th>
           </tr></thead>
           <tbody>${linhas}</tbody>
         </table>
       </div>
-    </div>`;
+    </div>`}`;
 }
 
 // Limpa todo o cronograma macro do projeto (atividades, mapeamentos DE-PARA e prazos herdados),
