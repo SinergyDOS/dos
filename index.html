@@ -669,7 +669,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-05-gantt-d';
+const DOS_BUILD = '2026-08-06-excluir-projeto';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -3441,7 +3441,8 @@ function renderProjetoDetail(p) {
   document.getElementById('topbar-actions').innerHTML = `
     <button class="btn btn-secondary btn-sm" onclick="nav('projetos')"><i class="ti ti-arrow-left"></i> Projetos</button>
     ${isGestor() ? `<button class="btn btn-secondary btn-sm" onclick="editarProjeto('${p.id}')"><i class="ti ti-edit"></i> Editar projeto</button>` : ''}
-    ${isGestor() ? `<button class="btn btn-primary btn-sm" onclick="modalAdicionarTarefa('${p.id}')"><i class="ti ti-plus"></i> Nova tarefa</button>` : ''}`;
+    ${isGestor() ? `<button class="btn btn-primary btn-sm" onclick="modalAdicionarTarefa('${p.id}')"><i class="ti ti-plus"></i> Nova tarefa</button>` : ''}
+    ${isGestor() ? `<button class="btn btn-sm btn-excluir" title="Excluir projeto" aria-label="Excluir projeto" onclick="modalExcluirProjeto('${p.id}')"><i class="ti ti-trash"></i></button>` : ''}`;
 
   const tasks = p.tasks || [];
   const done = tasks.filter(t=>t.status==='concluida').length;
@@ -3906,6 +3907,86 @@ function instanciarMacrosDoTemplate(projeto, tpl) {
     });
     tarefas.forEach(t => { t.macroActivityId = macroId; });
   });
+}
+
+// ==================== EXCLUSÃO DE PROJETO ====================
+// Ação irreversível: remove o projeto e, por cascata no banco, suas tarefas,
+// riscos e follow ups. Restrita ao gestor e protegida por confirmação digitada.
+function modalExcluirProjeto(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode excluir projetos.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  const nTar = (p.tasks || []).length;
+  const nCon = (p.tasks || []).filter(t => t.status === 'concluida').length;
+  const nRis = (p.risks || []).length;
+  const nFu  = (p.followUps || []).length;
+  openModal(`<div class="modal-header">
+    <div class="modal-title" style="color:var(--danger)"><i class="ti ti-alert-triangle" style="margin-right:8px"></i>Excluir projeto</div>
+    <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="modal-body">
+    <div style="background:var(--danger-bg);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:700;color:#991b1b;margin-bottom:6px">Esta ação não pode ser desfeita.</div>
+      <div style="font-size:12.5px;color:#7f1d1d;line-height:1.7">
+        Serão apagados junto com <strong>${p.nome}</strong>:<br>
+        · ${nTar} tarefa(s)${nCon?` — incluindo ${nCon} já concluída(s)`:''}<br>
+        · ${nRis} risco(s)<br>
+        · ${nFu} registro(s) de follow up<br>
+        · o cronograma macro e os vínculos DE-PARA
+      </div>
+    </div>
+    <div id="exAlert" class="form-alert" style="display:none"><i class="ti ti-alert-circle" style="font-size:15px"></i><span id="exAlertMsg"></span></div>
+    <div class="form-group" style="margin-bottom:0">
+      <label class="form-label">Para confirmar, digite o nome do projeto</label>
+      <input class="form-input" id="exNome" placeholder="${p.nome.replace(/"/g,'&quot;')}" autocomplete="off">
+      <div style="font-size:11px;color:var(--gray-400);margin-top:4px">Precisa ser exatamente: <strong>${p.nome}</strong></div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-danger" id="exBtn" onclick="confirmarExcluirProjeto('${pId}')"><i class="ti ti-trash"></i> Excluir definitivamente</button>
+  </div>`);
+}
+
+async function confirmarExcluirProjeto(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode excluir projetos.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  const el = id => document.getElementById(id);
+  const erro = msg => { const a=el('exAlert'), b=el('exAlertMsg'); if(a&&b){ b.textContent=msg; a.style.display='flex'; } };
+  if (el('exAlert')) el('exAlert').style.display = 'none';
+
+  const digitado = (el('exNome')?.value || '').trim();
+  if (_normTxt(digitado) !== _normTxt(p.nome)) {
+    erro('O nome digitado não confere com o nome do projeto.');
+    el('exNome')?.focus();
+    return;
+  }
+  const btn = el('exBtn');
+  const lbl = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Excluindo...'; }
+
+  if (sbClient) {
+    // tarefas, riscos e follow ups saem por cascata (on delete cascade)
+    const { data, error } = await sbClient.from('projects').delete().eq('id', pId).select('id');
+    if (error) {
+      if (btn) { btn.disabled = false; btn.innerHTML = lbl; }
+      erro('Não foi possível excluir: ' + error.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      if (btn) { btn.disabled = false; btn.innerHTML = lbl; }
+      erro('O projeto não foi excluído no servidor (verifique suas permissões).');
+      return;
+    }
+  }
+  state.projetos = state.projetos.filter(x => x.id !== pId);
+  state.currentProjetoId = null;
+  saveState();
+  closeModal();
+  renderSidebar();
+  nav('projetos');
+  notificar(`Projeto "${p.nome}" excluído.`, 'sucesso');
 }
 
 // ==================== FOLLOW UP ====================
@@ -6044,8 +6125,12 @@ function modalAdicionarTarefa(pId) {
   if (!isGestor()) { notificar('Apenas o gestor de projetos pode incluir tarefas.', 'erro'); return; }
   const p = state.projetos.find(x => x.id === pId);
   if (!p) return;
-  const fases = Object.keys(FASE_COLORS);
-  const temas = Object.keys(TEMA_COLORS);
+  // As fases vêm do checklist DESTE projeto — cada template tem as suas.
+  // (Só cai nas fases do sistema se o projeto ainda não tiver tarefa alguma.)
+  const fasesProjeto = _ordenarFases([...new Set((p.tasks || []).map(t => t.fase).filter(Boolean))]);
+  const fases = fasesProjeto.length ? fasesProjeto : Object.keys(FASE_COLORS);
+  const temasProjeto = [...new Set((p.tasks || []).map(t => t.tema).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const temas = temasProjeto.length ? temasProjeto : Object.keys(TEMA_COLORS);
   const macros = Array.isArray(p.macroActivities) ? p.macroActivities : [];
   openModal(`<div class="modal-header">
     <div class="modal-title"><i class="ti ti-plus" style="margin-right:8px;color:var(--accent)"></i>Nova tarefa — ${p.nome}</div>
