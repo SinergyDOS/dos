@@ -749,7 +749,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-06-checklists-ponto';
+const DOS_BUILD = '2026-08-07-trocar-checklist-b';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -3547,6 +3547,7 @@ function renderProjetoDetail(p) {
     <button class="btn btn-secondary btn-sm" onclick="nav('projetos')"><i class="ti ti-arrow-left"></i> Projetos</button>
     ${isGestor() ? `<button class="btn btn-secondary btn-sm" onclick="editarProjeto('${p.id}')"><i class="ti ti-edit"></i> Editar projeto</button>` : ''}
     ${isGestor() ? `<button class="btn btn-primary btn-sm" onclick="modalAdicionarTarefa('${p.id}')"><i class="ti ti-plus"></i> Nova tarefa</button>` : ''}
+    ${isGestor() ? `<button class="btn btn-secondary btn-sm" title="Trocar o checklist deste projeto" onclick="modalTrocarChecklist('${p.id}')"><i class="ti ti-replace"></i> Trocar checklist</button>` : ''}
     ${isGestor() ? `<button class="btn btn-sm btn-excluir" title="Excluir projeto" aria-label="Excluir projeto" onclick="modalExcluirProjeto('${p.id}')"><i class="ti ti-trash"></i></button>` : ''}`;
 
   const tasks = p.tasks || [];
@@ -4012,6 +4013,167 @@ function instanciarMacrosDoTemplate(projeto, tpl) {
     });
     tarefas.forEach(t => { t.macroActivityId = macroId; });
   });
+}
+
+
+// ==================== TROCA DE CHECKLIST DO PROJETO ====================
+// Substitui o checklist de um projeto em andamento. Como os nomes das tarefas
+// mudam entre templates, não há casamento automático: a lista é substituída.
+// Por isso oferecemos preservar o que já foi concluído.
+function _trocaSimular(p, tplId, preservar) {
+  const tpl = (state.checklistTemplates || []).find(t => t.id === tplId);
+  if (!tpl) return null;
+  const atuais = Array.isArray(p.tasks) ? p.tasks : [];
+  const concluidas = atuais.filter(t => t.status === 'concluida');
+  const removidas = preservar ? atuais.filter(t => t.status !== 'concluida') : atuais;
+  return {
+    tpl,
+    novas: (tpl.tasks || []).length,
+    removidas: removidas.length,
+    removidasConcluidas: removidas.filter(t => t.status === 'concluida').length,
+    preservadas: preservar ? concluidas.length : 0,
+    macrosNovas: (tpl.deParaTemplate || []).length,
+    macrosAtuais: (p.macroActivities || []).length
+  };
+}
+
+function modalTrocarChecklist(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode trocar o checklist.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  const atual = (state.checklistTemplates || []).find(t => t.id === p.templateId);
+  const opcoes = (state.checklistTemplates || []).filter(t => t.id !== p.templateId);
+  if (!opcoes.length) { notificar('Não há outro checklist disponível.', 'erro'); return; }
+  openModal(`<div class="modal-header">
+    <div class="modal-title"><i class="ti ti-replace" style="margin-right:8px;color:var(--accent)"></i>Trocar checklist — ${p.nome}</div>
+    <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="modal-body">
+    <div style="font-size:12px;color:var(--gray-500);margin-bottom:14px">
+      Checklist atual: <strong>${atual ? atual.nome : 'nenhum'}</strong> · ${(p.tasks||[]).length} tarefa(s)
+    </div>
+    <div id="tcAlert" class="form-alert" style="display:none"><i class="ti ti-alert-circle" style="font-size:15px"></i><span id="tcAlertMsg"></span></div>
+    <div class="form-group">
+      <label class="form-label">Novo checklist <span class="req-star">*</span></label>
+      <select class="form-input form-select" id="tcTpl" onchange="previewTrocaChecklist('${pId}')">
+        <option value="">Selecione...</option>
+        ${opcoes.map(t=>`<option value="${t.id}">${t.nome} (${(t.tasks||[]).length} tarefas)</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;color:var(--gray-700)">
+        <input type="checkbox" id="tcPreservar" checked style="margin-top:3px" onchange="previewTrocaChecklist('${pId}')">
+        <span>Preservar as tarefas já concluídas do checklist atual
+          <span style="display:block;font-size:11px;color:var(--gray-400);margin-top:2px">Elas continuam no projeto como registro do que já foi entregue, junto com as novas.</span></span>
+      </label>
+    </div>
+    <div id="tcPreview"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" id="tcBtn" onclick="executarTrocaChecklist('${pId}')"><i class="ti ti-check"></i> Trocar checklist</button>
+  </div>`);
+}
+
+function previewTrocaChecklist(pId) {
+  const p = state.projetos.find(x => x.id === pId);
+  const box = document.getElementById('tcPreview');
+  const tplId = document.getElementById('tcTpl')?.value;
+  if (!p || !box) return;
+  if (!tplId) { box.innerHTML = ''; return; }
+  const preservar = document.getElementById('tcPreservar')?.checked !== false;
+  const s = _trocaSimular(p, tplId, preservar);
+  if (!s) { box.innerHTML = ''; return; }
+  const perde = s.removidasConcluidas > 0;
+  box.innerHTML = `<div style="background:${perde?'var(--danger-bg)':'var(--gray-50)'};border-radius:8px;padding:11px 13px">
+    <div style="font-size:12px;font-weight:700;color:${perde?'#991b1b':'var(--gray-700)'};margin-bottom:6px">
+      <i class="ti ti-arrow-bounce" style="font-size:13px;vertical-align:-2px"></i> O que vai acontecer
+    </div>
+    <div style="font-size:12px;color:${perde?'#7f1d1d':'var(--gray-600)'};line-height:1.7">
+      · <strong>${s.novas}</strong> tarefa(s) do novo checklist serão adicionadas<br>
+      · <strong>${s.removidas}</strong> tarefa(s) atuais serão removidas${s.removidasConcluidas?` — <strong>incluindo ${s.removidasConcluidas} já concluída(s)</strong>`:''}<br>
+      ${s.preservadas?`· <strong>${s.preservadas}</strong> concluída(s) serão mantidas como registro<br>`:''}
+      · o cronograma macro será refeito (${s.macrosAtuais} atividade(s) atual(is) → ${s.macrosNovas} nova(s)), <strong>perdendo as datas já preenchidas</strong>
+    </div>
+  </div>`;
+}
+
+async function executarTrocaChecklist(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode trocar o checklist.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  const el = id => document.getElementById(id);
+  const erro = msg => { const a=el('tcAlert'), b=el('tcAlertMsg'); if(a&&b){ b.textContent=msg; a.style.display='flex'; } };
+  if (el('tcAlert')) el('tcAlert').style.display = 'none';
+
+  const tplId = el('tcTpl')?.value;
+  if (!tplId) { erro('Selecione o novo checklist.'); return; }
+  const preservar = el('tcPreservar')?.checked !== false;
+  const s = _trocaSimular(p, tplId, preservar);
+  if (!s) { erro('Checklist não encontrado.'); return; }
+  if (!confirm(`Trocar o checklist de "${p.nome}"?\n\n${s.novas} tarefa(s) serão adicionadas e ${s.removidas} removidas${s.removidasConcluidas?` (${s.removidasConcluidas} concluídas)`:''}.\nO cronograma macro será refeito e as datas atuais serão perdidas.\n\nEsta ação não pode ser desfeita.`)) return;
+
+  const btn = el('tcBtn');
+  const lbl = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Trocando...'; }
+
+  const antesTasks = [...(p.tasks || [])];
+  const antesMacros = JSON.parse(JSON.stringify(p.macroActivities || []));
+  const antesMaps = JSON.parse(JSON.stringify(p.macroMappings || []));
+  const antesTpl = p.templateId;
+
+  const manter = preservar ? antesTasks.filter(t => t.status === 'concluida') : [];
+  const remover = antesTasks.filter(t => !manter.includes(t));
+  const novas = (s.tpl.tasks || []).map(t => ({
+    ...t, id: uid(), templateTaskId: t.id, status: 'pendente',
+    prazo: null, prazoOrigem: null, _prazoManual: false,
+    comentario: '', concluidaEm: null, macroActivityId: null,
+    bloqueioCom: '', bloqueioDesde: null, bloqueioObs: ''
+  }));
+
+  // Concluídas preservadas ficam ao final, desvinculadas do novo cronograma.
+  // O templateTaskId precisa ser limpo: senão colide com o das tarefas novas
+  // (ambas usariam 'ct0', 'ct1'...) e o vínculo com as macros sai errado.
+  const preservadas = manter.map(t => ({ ...t, macroActivityId: null, templateTaskId: null }));
+  p.tasks = [...novas, ...preservadas];
+  p.templateId = tplId;
+  instanciarMacrosDoTemplate(p, s.tpl);
+
+  try {
+    if (sbClient) {
+      if (remover.length) {
+        const ids = remover.map(t => t.id);
+        for (let i = 0; i < ids.length; i += 200) {
+          const { error } = await sbClient.from('tasks').delete().in('id', ids.slice(i, i + 200));
+          if (error) throw new Error(error.message);
+        }
+      }
+      const rows = novas.map((t, i) => _tarefaParaRow(t, p.id, i));
+      for (let i = 0; i < rows.length; i += 200) {
+        const { error } = await sbClient.from('tasks').insert(rows.slice(i, i + 200));
+        if (error) throw new Error(error.message);
+      }
+      const { data, error: pErr } = await sbClient.from('projects').update({
+        template_id: tplId,
+        macro_activities: p.macroActivities,
+        macro_mappings: p.macroMappings
+      }).eq('id', p.id).select('id');
+      if (pErr) throw new Error(pErr.message);
+      if (!data || data.length === 0) throw new Error('o projeto não foi atualizado no servidor (verifique suas permissões).');
+    }
+  } catch (e) {
+    // desfaz na tela para não divergir do banco
+    p.tasks = antesTasks; p.macroActivities = antesMacros; p.macroMappings = antesMaps; p.templateId = antesTpl;
+    if (btn) { btn.disabled = false; btn.innerHTML = lbl; }
+    erro('Não foi possível trocar: ' + e.message + ' Recarregue a página para conferir o estado real.');
+    return;
+  }
+
+  saveState();
+  closeModal();
+  renderProjetoDetail(p);
+  renderSidebar();
+  notificar(`Checklist trocado para "${s.tpl.nome}". ${novas.length} tarefa(s) adicionada(s)${manter.length?`, ${manter.length} concluída(s) preservada(s)`:''}.`, 'sucesso');
 }
 
 // ==================== EXCLUSÃO DE PROJETO ====================
