@@ -749,7 +749,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-07-trocar-checklist-b';
+const DOS_BUILD = '2026-08-07-filtro-nao-concluidos';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -2019,6 +2019,9 @@ function normalizeExecutiveFilters() {
   ['search','module','goLivePeriod','currentPhase','projectStatus','consultant','analyst','riskFilter','blockerFilter'].forEach(k => {
     if (typeof f[k] !== 'string') f[k] = '';
   });
+  // Com o portfólio crescendo, a leitura útil é o que está em andamento.
+  // Entra como padrão na primeira abertura; depois vale a escolha do usuário.
+  if (!f._padraoAplicado) { f.projectStatus = 'nao-concluidos'; f._padraoAplicado = true; }
   return f;
 }
 
@@ -2063,7 +2066,9 @@ function getFilteredExecutiveProjects() {
       if (f.currentPhase === '__none__') { if (!fase.notStarted) return false; }
       else if (fase.name !== f.currentPhase) return false;
     }
-    if (f.projectStatus) {
+    if (f.projectStatus === 'nao-concluidos') {
+      if (getProjectExecutiveStatus(p).key === 'completed') return false;
+    } else if (f.projectStatus) {
       const st = getProjectExecutiveStatus(p);
       if (st.key !== f.projectStatus) return false;
     }
@@ -2335,7 +2340,7 @@ function renderExecutiveFilters() {
   const temFiltro = Object.values(f).some(v => v);
 
   const periodOpts = [['','Todos os Go-lives'],['vencidos','Vencidos'],['prox30','Próximos 30 dias'],['prox60','Próximos 60 dias'],['prox90','Próximos 90 dias'],['este-mes','Este mês'],['prox-mes','Próximo mês'],['este-tri','Este trimestre'],['prox-tri','Próximo trimestre'],['este-ano','Este ano'],['sem-data','Sem data']];
-  const statusOpts = [['','Toda situação'],['planned','Planejado'],['on-track','Em andamento'],['attention','Atenção'],['critical','Crítico'],['completed','Concluído']];
+  const statusOpts = [['nao-concluidos','Todos exceto concluídos'],['','Toda situação'],['planned','Planejado'],['on-track','Em andamento'],['attention','Atenção'],['critical','Crítico'],['completed','Concluído']];
   const riskOpts = [['','Todos (riscos)'],['com-abertos','Com riscos abertos'],['sem-abertos','Sem riscos abertos'],['alto-impacto','Com impacto alto'],['vencidos','Com riscos vencidos']];
   const blockerOpts = [['','Todos (impeditivos)'],['com-impeditivo','Com impeditivo ativo'],['sem-impeditivo','Sem impeditivo ativo']];
 
