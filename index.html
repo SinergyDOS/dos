@@ -592,6 +592,86 @@ const DEFAULT_DEPARA_TEMPLATE = [
   {macroKey:"ASSINATURA_DOS_CADERNOS",macroNameLabel:"Assinatura dos cadernos",checklistTaskIds:["ct213","ct214","ct215"]}
 ];
 
+// ── Checklists de Ponto: transição do Nexus e novos clientes ──
+const DEFAULT_CHECKLIST_TASKS_PONTO_NEXUS = [
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Solicitar Criação da Base de Ponto",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Carga Inicial de dados: cargo, verba, centro de custo, feriados e empresa",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Preenchimento Caderno de Implantação Conforme NEXUS (relógios, horários, escalas, regras, protocolo comunicação e particularidades)",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Envio para Validação: Caderno de ponto",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Envio para Validação: horarios, escalas, motivos de afastamentos, motivos de justificativa de inclusão de marcação manual, justificade de HE (Caso justifiquem), local de trabalho quando houver, Gestor e Sindicato",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Validação Caderno de implantação - Devolutiva Cliente",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Assinatura do Caderno de Implantação Ponto",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Enviar planilha de associação de funcionários: escalas, sindicatos, tipo de ponto.",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Devolutiva da planilha de associação dos funcionários",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Validação dos usuários gestores e funcionários e criação dos usuários de RH",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Validação da visão dos acessos Gestores, RH e Funcionários",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Cadastro das Acordo Coletivo x Sindicatos",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Cadastro horários x escalas",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Cadastro do grupo e rotas WorkFlow (Solicitação e Aprovação)",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Abertura de chamado solicitando a carga da planilha e integração funcionários",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Cadastro dos relógios físicos e APP - Caso possua",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Enviar planilha funcionários x terminais de coletas (relógio físico ou/APP)",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Devolutiva da planilha funcionários x terminais de coleta (relógio físico)",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Simulação dos exemplos de ponto sistema Sinergy (paralelo de cálculo)",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Parametrização dos grupos de usuários (RH, Gestor e Funcionários)",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Treinamento do Ponto Eletrônico time RH e Gestores",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Liberação link externo do ponto Nexus para o time de RH",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Atualizar referência do Ponto",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 4 - Go live",tema:"Ponto",tarefa:"Ativar Integração Folha x Ponto Sinergy",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 4 - Go live",tema:"Ponto",tarefa:"Criar/Ligar Agendamento de Cálculo Automático (Na data do go live)",responsavel:"Consultor;Analista",esforco:"",help:"",_goLiveMarker:true},
+  {fase:"Fase 4 - Go live",tema:"Ponto",tarefa:"Envio saldo do banco de horas para importação",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 4 - Go live",tema:"Ponto",tarefa:"Chamado para importação saldo de horas",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 4 - Go live",tema:"Ponto",tarefa:"Validação Importação saldo do banco de horas",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 5 - Operação assistida",tema:"Ponto",tarefa:"Acompanhamento do primeiro fechamento do ponto",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 5 - Operação assistida",tema:"Ponto",tarefa:"Revisão X Assinatura do caderno de ponto",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 5 - Operação assistida",tema:"Ponto",tarefa:"Transição para Operação - Passagem de Bastão",responsavel:"Consultor;Analista",esforco:"",help:""}
+];
+const DEFAULT_DEPARA_PONTO_NEXUS = [
+  {macroKey:"DIAGNOSTICO",macroNameLabel:"Diagnóstico",checklistTaskIds:["ct0","ct1","ct2","ct3","ct4","ct5","ct6","ct7","ct8","ct9","ct10"]},
+  {macroKey:"CONFIGURACAO_DO_SISTEMA",macroNameLabel:"Configuração do Sistema",checklistTaskIds:["ct11","ct12","ct13","ct14","ct15","ct16","ct17"]},
+  {macroKey:"PARALELO_OFICIAL",macroNameLabel:"Paralelo Oficial",checklistTaskIds:["ct18","ct19","ct20","ct21","ct22"]},
+  {macroKey:"GO_LIVE",macroNameLabel:"Go live",checklistTaskIds:["ct23","ct24","ct25","ct26","ct27"]},
+  {macroKey:"OPERACAO_ASSISTIDA",macroNameLabel:"Operação assistida",checklistTaskIds:["ct28","ct29","ct30"]}
+];
+const DEFAULT_CHECKLIST_TASKS_PONTO_NOVOS = [
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Solicitar Criação da Base de Ponto",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Carga Inicial de dados: cargo, verba, centro de custo, feriados e empresa",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Envio do caderno de ponto e planilha de cadastro horarios, escalas, motivos de afastamentos, motivos de justificativa de inclusão de marcação manual, justificade de HE (Caso justifiquem), local de trabalho quando houver, Gestor e Sindicato",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Preenchimento: Caderno de Implantação ponto - (relógios, horários, escalas, regras, protocolo comunicação e particularidades).",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Preenchimento: Planilha Horarios, escalas, motivos de afastamentos, motivos de justificativa de inclusão de marcação manual, justificade de HE (Caso justifiquem), local de trabalho quando houver, Gestor e Sindicato",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Envio da CCT atualizada",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Assinatura do Caderno de Implantação Ponto",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Enviar planilha de associação de funcionários: escalas, sindicatos, tipo de ponto.",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 1 - Diagnóstico",tema:"Ponto",tarefa:"Devolutiva da planilha de associação dos funcionários",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Validação dos usuários gestores e funcionários e criação dos usuários de RH",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Validação da visão dos acessos Gestores, RH e Funcionários",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Cadastro das Acordo Coletivo x Sindicatos",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Cadastro horários x escalas",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Cadastro do grupo e rotas WorkFlow (Solicitação e Aprovação)",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Abertura de chamado solicitando a carga da planilha e integração funcionários",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Cadastro dos relógios físicos e APP - Caso possua",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Enviar check-list com as evidencias de comunicação do relógio e associação de colaborador para cada terminal",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 2 - Configuração do Sistema",tema:"Ponto",tarefa:"Devolutiva check-list com as evidencias de comunicação do relógio e associação de colaborador para cada terminal",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Simulação dos exemplos de ponto sistema Sinergy (paralelo de cálculo)",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Parametrização dos grupos de usuários (RH, Gestor e Funcionários)",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Treinamento do Ponto Eletrônico time RH e Gestores",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 3 - Paralelo Oficial",tema:"Ponto",tarefa:"Atualizar referência do Ponto",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 4 - Go live",tema:"Ponto",tarefa:"Ativar Integração Folha x Ponto Sinergy",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 4 - Go live",tema:"Ponto",tarefa:"Criar/Ligar Agendamento de Cálculo Automático (Na data do go live)",responsavel:"Consultor;Analista",esforco:"",help:"",_goLiveMarker:true},
+  {fase:"Fase 4 - Go live",tema:"Ponto",tarefa:"Envio saldo do banco de horas para importação",responsavel:"Consultor;Analista;Cliente",esforco:"",help:""},
+  {fase:"Fase 4 - Go live",tema:"Ponto",tarefa:"Chamado para importação saldo de horas",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 4 - Go live",tema:"Ponto",tarefa:"Validação Importação saldo do banco de horas",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 5 - Operação assistida",tema:"Ponto",tarefa:"Acompanhamento do primeiro fechamento do ponto",responsavel:"Consultor;Analista",esforco:"",help:""},
+  {fase:"Fase 5 - Operação assistida",tema:"Ponto",tarefa:"Transição para Operação - Passagem de Bastão",responsavel:"Consultor;Analista",esforco:"",help:""}
+];
+const DEFAULT_DEPARA_PONTO_NOVOS = [
+  {macroKey:"DIAGNOSTICO",macroNameLabel:"Diagnóstico",checklistTaskIds:["ct0","ct1","ct2","ct3","ct4","ct5","ct6","ct7","ct8"]},
+  {macroKey:"CONFIGURACAO_DO_SISTEMA",macroNameLabel:"Configuração do Sistema",checklistTaskIds:["ct9","ct10","ct11","ct12","ct13","ct14","ct15","ct16","ct17"]},
+  {macroKey:"PARALELO_OFICIAL",macroNameLabel:"Paralelo Oficial",checklistTaskIds:["ct18","ct19","ct20","ct21"]},
+  {macroKey:"GO_LIVE",macroNameLabel:"Go live",checklistTaskIds:["ct22","ct23","ct24","ct25","ct26"]},
+  {macroKey:"OPERACAO_ASSISTIDA",macroNameLabel:"Operação assistida",checklistTaskIds:["ct27","ct28"]}
+];
+
 // ── Checklist de projetos de Customização (fluxo de desenvolvimento) ──
 const DEFAULT_CHECKLIST_TASKS_CUSTOM = [
   {fase:"Fase 1 - Mobilização e especificação",tema:"Geral",tarefa:"Elaborar cronograma de atividades do projeto",responsavel:"Gestor",esforco:"",help:""},
@@ -669,7 +749,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-06-excluir-projeto';
+const DOS_BUILD = '2026-08-06-checklists-ponto';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -742,7 +822,7 @@ function loadState() {
   // ── Template padrão de checklist ──────────────────────────────────────────
   // CHECKLIST_VERSION incrementa quando o checklist padrão muda. Usuários que já
   // têm o portal aberto recebem a versão nova automaticamente, SEM perder projetos.
-  const CHECKLIST_VERSION = 8;
+  const CHECKLIST_VERSION = 9;
   const buildDefaultTemplate = () => ({
     id: 'tpl1',
     nome: 'Checklist Padrão de Implantação',
@@ -780,12 +860,31 @@ function loadState() {
     tasks: DEFAULT_CHECKLIST_TASKS_CUSTOM.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
     deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE_CUSTOM))
   });
+  const buildTemplatePontoNexus = () => ({
+    id: 'tpl5',
+    nome: 'Checklist Ponto - Transição Nexus',
+    descricao: 'Migração de clientes do Nexus para o Ponto Sinergy — 31 atividades, 5 fases',
+    versao: CHECKLIST_VERSION,
+    tasks: DEFAULT_CHECKLIST_TASKS_PONTO_NEXUS.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
+    deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_PONTO_NEXUS))
+  });
+  const buildTemplatePontoNovos = () => ({
+    id: 'tpl6',
+    nome: 'Checklist Ponto novos clientes',
+    descricao: 'Implantação do Ponto Sinergy para novos clientes — 29 atividades, 5 fases',
+    versao: CHECKLIST_VERSION,
+    tasks: DEFAULT_CHECKLIST_TASKS_PONTO_NOVOS.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
+    deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_PONTO_NOVOS))
+  });
   const CONSTRUTORES_TEMPLATE = [
     { id:'tpl1', build: buildDefaultTemplate },
-    { id:'tpl2', build: buildTemplatePonto },
+    { id:'tpl5', build: buildTemplatePontoNexus },
+    { id:'tpl6', build: buildTemplatePontoNovos },
     { id:'tpl3', build: buildTemplateRH },
     { id:'tpl4', build: buildTemplateCustom }
   ];
+  // tpl2 ("Checklist Ponto") era provisório e foi substituído pelos dois acima.
+  const TEMPLATES_DESCONTINUADOS = ['tpl2'];
 
   if (!state.checklistTemplates || state.checklistTemplates.length === 0) {
     // Primeira execução: cria os templates padrão
@@ -801,7 +900,10 @@ function loadState() {
         state.checklistTemplates[idx] = c.build();
       }
     });
-    // Mantém tpl1 no topo da lista
+    // Remove templates descontinuados (projetos existentes não são afetados:
+    // eles têm cópia própria das tarefas)
+    state.checklistTemplates = state.checklistTemplates.filter(t => !TEMPLATES_DESCONTINUADOS.includes(t.id));
+    // Mantém a ordem dos construtores
     state.checklistTemplates.sort((a,b) => {
       const oa = CONSTRUTORES_TEMPLATE.findIndex(c=>c.id===a.id);
       const ob = CONSTRUTORES_TEMPLATE.findIndex(c=>c.id===b.id);
@@ -1515,6 +1617,9 @@ const FASE_COLORS = {
   'Fase 2 - Desenvolvimento': {bg:'#ede9fe',color:'#5b21b6'},
   'Fase 3 - Testes e homologação': {bg:'#fef9c3',color:'#854d0e'},
   'Fase 4 - Operação assistida': {bg:'#dcfce7',color:'#14532d'},
+  // Fases dos checklists de Ponto (Transição Nexus e novos clientes)
+  'Fase 4 - Go live': {bg:'#ffedd5',color:'#9a3412'},
+  'Fase 5 - Operação assistida': {bg:'#d1fae5',color:'#065f46'},
 };
 const TEMA_COLORS = {
   'Folha':'#2e6ef7','Beneficios':'#16a34a','Contábil':'#7c3aed',
