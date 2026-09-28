@@ -749,7 +749,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-07-filtro-nao-concluidos';
+const DOS_BUILD = '2026-08-08-checklist-macro';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -7773,15 +7773,22 @@ function renderChecklistTasks(tpl) {
     return `<div style="margin-bottom:16px">
       <div style="font-size:12px;font-weight:700;padding:6px 12px;border-radius:6px;background:${fc.bg};color:${fc.color};margin-bottom:8px;display:inline-block">${fase}</div>
       <table style="width:100%">
-        <thead><tr><th>Tarefa</th><th>Tema</th><th>Responsável</th><th>Esforço</th><th style="width:80px"></th></tr></thead>
+        <thead><tr><th>Tarefa</th><th>Tema</th><th>Macro atividade</th><th>Responsável</th><th>Esforço</th><th style="width:92px"></th></tr></thead>
         <tbody>
           ${ts.map(t => `<tr>
-            <td style="cursor:pointer;font-weight:500" onclick="modalEditarTarefaChecklist('${tpl.id}','${t.id}')">${t.tarefa} ${helpIconHTML(t)}</td>
+            <td style="font-weight:500">${t.tarefa} ${helpIconHTML(t)}</td>
             <td><span class="badge" style="background:${(TEMA_COLORS[t.tema]||'#64748b')}18;color:${TEMA_COLORS[t.tema]||'#64748b'}">${t.tema}</span></td>
+            <td style="font-size:12px;color:var(--gray-600)">${(() => {
+              const dd = (tpl.deParaTemplate||[]).find(x => (x.checklistTaskIds||[]).includes(t.id));
+              return dd ? dd.macroNameLabel : '<span style="color:var(--gray-300)">sem vínculo</span>';
+            })()}</td>
             <td style="font-size:12px">${t.responsavel||'—'}</td>
             <td style="font-size:12px">${t.esforco||'—'}</td>
-            <td>
-              <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="removerTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-trash"></i></button>
+            <td style="white-space:nowrap">
+              <div style="display:flex;gap:4px">
+                <button class="btn btn-secondary btn-sm" style="padding:3px 7px" title="Editar tarefa" aria-label="Editar tarefa" onclick="modalEditarTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-edit"></i></button>
+                <button class="btn btn-sm btn-excluir" title="Excluir tarefa do template" aria-label="Excluir tarefa" onclick="removerTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-trash"></i></button>
+              </div>
             </td>
           </tr>`).join('')}
         </tbody>
@@ -7838,9 +7845,40 @@ function modalEditarChecklist(id) {
   </div>`);
 }
 
+// Fases e temas de UM template. Cada checklist tem o seu conjunto — listar
+// todos misturaria fases de implantação com as de customização, por exemplo.
+function _fasesDoTemplate(tpl) {
+  const fs = _ordenarFases([...new Set((tpl?.tasks || []).map(t => t.fase).filter(Boolean))]);
+  return fs.length ? fs : Object.keys(FASE_COLORS);
+}
+function _temasDoTemplate(tpl) {
+  const ts = [...new Set((tpl?.tasks || []).map(t => t.tema).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  return ts.length ? ts : Object.keys(TEMA_COLORS);
+}
+
+// Seletor de macro atividade do PRÓPRIO template (o DE-PARA dele).
+// É o que define em qual macro a tarefa entra no cronograma dos projetos.
+function _selectMacroTemplate(tpl, macroKeySel) {
+  const lista = Array.isArray(tpl?.deParaTemplate) ? tpl.deParaTemplate : [];
+  if (!lista.length) {
+    return `<input type="hidden" id="ctMacro" value="">
+      <div style="font-size:11px;color:var(--gray-400)">Este checklist ainda não tem macro atividades definidas.</div>`;
+  }
+  return `<select class="form-input form-select" id="ctMacro">
+      <option value="">— Sem vínculo com o cronograma —</option>
+      ${lista.map(d => `<option value="${d.macroKey}" ${macroKeySel===d.macroKey?'selected':''}>${d.macroNameLabel} (${(d.checklistTaskIds||[]).length} tarefa${(d.checklistTaskIds||[]).length!==1?'s':''})</option>`).join('')}
+    </select>`;
+}
+// Em qual macro do template esta tarefa está?
+function _macroDaTarefaTemplate(tpl, taskId) {
+  const d = (tpl?.deParaTemplate || []).find(x => (x.checklistTaskIds||[]).includes(taskId));
+  return d ? d.macroKey : '';
+}
+
 function modalAdicionarTarefaChecklist(tplId) {
-  const fases = Object.keys(FASE_COLORS);
-  const temas = Object.keys(TEMA_COLORS);
+  const tplAtual = state.checklistTemplates.find(t => t.id === tplId);
+  const fases = _fasesDoTemplate(tplAtual);
+  const temas = _temasDoTemplate(tplAtual);
   openModal(`<div class="modal-header">
     <div class="modal-title">Adicionar tarefa ao checklist</div>
     <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
@@ -7857,6 +7895,9 @@ function modalAdicionarTarefaChecklist(tplId) {
       <div class="form-group"><label class="form-label">Responsável padrão</label><input class="form-input" id="ctResp" placeholder="Ex: Consultor, Analista"></div>
       <div class="form-group"><label class="form-label">Esforço estimado</label><input class="form-input" id="ctEsforco" placeholder="Ex: 4 horas"></div>
     </div>
+    <div class="form-group"><label class="form-label">Macro atividade <span style="font-weight:400;color:var(--gray-400)">(opcional)</span></label>
+      ${_selectMacroTemplate(tplAtual, '')}
+      <div style="font-size:11px;color:var(--gray-400);margin-top:4px">Define em qual entrega do cronograma esta tarefa entra nos projetos criados com este checklist.</div></div>
     <div class="form-group"><label class="form-label">Help / Orientação</label>
       <textarea class="form-input form-textarea" id="ctHelp" placeholder="Descreva o objetivo e o procedimento desta tarefa..."></textarea></div>
   </div>
@@ -7877,21 +7918,40 @@ function salvarTarefaChecklist(tplId, editId) {
     esforco: document.getElementById('ctEsforco').value,
     help: document.getElementById('ctHelp').value, status:'pendente'
   };
+  let taskId = editId;
   if (editId) {
     const t = tpl.tasks.find(x=>x.id===editId);
     Object.assign(t, data);
   } else {
-    tpl.tasks.push({...data, id:uid()});
+    taskId = uid();
+    tpl.tasks.push({...data, id:taskId});
   }
+  // vínculo com a macro atividade do template
+  const macroKey = document.getElementById('ctMacro')?.value || '';
+  if (!Array.isArray(tpl.deParaTemplate)) tpl.deParaTemplate = [];
+  tpl.deParaTemplate.forEach(d => {
+    d.checklistTaskIds = (d.checklistTaskIds || []).filter(c => c !== taskId);
+  });
+  if (macroKey) {
+    const alvo = tpl.deParaTemplate.find(d => d.macroKey === macroKey);
+    if (alvo) {
+      // mantém a ordem do checklist dentro da macro
+      const ids = tpl.tasks.map(x => x.id);
+      alvo.checklistTaskIds = [...alvo.checklistTaskIds, taskId]
+        .sort((a,b) => ids.indexOf(a) - ids.indexOf(b));
+    }
+  }
+  tpl.deParaTemplate = tpl.deParaTemplate.filter(d => (d.checklistTaskIds||[]).length > 0);
   saveState(); closeModal(); renderChecklists();
+  notificar(editId ? 'Tarefa atualizada.' : 'Tarefa adicionada ao checklist.', 'sucesso');
 }
 
 function modalEditarTarefaChecklist(tplId, taskId) {
   const tpl = state.checklistTemplates.find(t=>t.id===tplId);
   const t = tpl?.tasks?.find(x=>x.id===taskId);
   if (!t) return;
-  const fases = Object.keys(FASE_COLORS);
-  const temas = Object.keys(TEMA_COLORS);
+  const fases = _fasesDoTemplate(tpl);
+  const temas = _temasDoTemplate(tpl);
   openModal(`<div class="modal-header">
     <div class="modal-title">Editar tarefa</div>
     <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
@@ -7910,6 +7970,9 @@ function modalEditarTarefaChecklist(tplId, taskId) {
     </div>
     <div class="form-group"><label class="form-label">Help / Orientação</label>
       <textarea class="form-input form-textarea" id="ctHelp">${t.help||''}</textarea></div>
+    <div class="form-group"><label class="form-label">Macro atividade <span style="font-weight:400;color:var(--gray-400)">(opcional)</span></label>
+      ${_selectMacroTemplate(tpl, _macroDaTarefaTemplate(tpl, taskId))}
+      <div style="font-size:11px;color:var(--gray-400);margin-top:4px">Define em qual entrega do cronograma esta tarefa entra nos projetos criados com este checklist.</div></div>
   </div>
   <div class="modal-footer">
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -7918,10 +7981,23 @@ function modalEditarTarefaChecklist(tplId, taskId) {
 }
 
 function removerTarefaChecklist(tplId, taskId) {
-  if (!confirm('Remover esta tarefa do template?')) return;
   const tpl = state.checklistTemplates.find(t=>t.id===tplId);
-  tpl.tasks = tpl.tasks.filter(t=>t.id!==taskId);
+  const t = tpl?.tasks?.find(x=>x.id===taskId);
+  if (!tpl || !t) return;
+  // a tarefa pode estar vinculada a uma macro no DE-PARA deste template
+  const emMacro = (tpl.deParaTemplate || []).find(d => (d.checklistTaskIds||[]).includes(taskId));
+  const aviso = emMacro ? `\n\nEla está vinculada à macro atividade "${emMacro.macroNameLabel}" — o vínculo também será removido.` : '';
+  if (!confirm(`Remover "${t.tarefa}" do template "${tpl.nome}"?${aviso}\n\nProjetos já criados não são afetados: eles têm cópia própria das tarefas.`)) return;
+  tpl.tasks = tpl.tasks.filter(x => x.id !== taskId);
+  // limpa a referência no DE-PARA e descarta macros que ficaram sem tarefa
+  if (Array.isArray(tpl.deParaTemplate)) {
+    tpl.deParaTemplate.forEach(d => {
+      d.checklistTaskIds = (d.checklistTaskIds || []).filter(c => c !== taskId);
+    });
+    tpl.deParaTemplate = tpl.deParaTemplate.filter(d => (d.checklistTaskIds || []).length > 0);
+  }
   saveState(); renderChecklists();
+  notificar('Tarefa removida do template.', 'sucesso');
 }
 
 // ==================== USUARIOS ====================
