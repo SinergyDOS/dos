@@ -749,7 +749,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-08-checklist-macro';
+const DOS_BUILD = '2026-08-08-botoes-rotulo';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -5961,7 +5961,7 @@ function renderMacroDeliveryGroup(p, fase, d) {
     </div>
     ${aberto ? `<table style="width:100%">
       <thead><tr>
-        <th style="width:28px"></th><th>Tarefa</th><th>Responsável</th><th>Status</th><th>Prazo</th><th>Esforço</th><th style="width:118px"></th>
+        <th style="width:28px"></th><th>Tarefa</th><th>Responsável</th><th>Status</th><th>Prazo</th><th>Esforço</th><th style="width:150px"></th>
       </tr></thead>
       <tbody>${d.tasks.map(t => renderHierarchicalTaskRow(p, t)).join('')}</tbody>
     </table>` : ''}
@@ -5983,7 +5983,7 @@ function renderUnmappedGroup(p, fase, tasksUnmapped) {
     ${aberto ? `<div style="padding:0 4px 4px">
       <div style="font-size:11px;color:#92400e;padding:8px 12px">Estas tarefas ainda não estão associadas a uma macro entrega do cronograma.</div>
       <table style="width:100%">
-        <thead><tr><th style="width:28px"></th><th>Tarefa</th><th>Responsável</th><th>Status</th><th>Prazo</th><th>Esforço</th><th style="width:118px"></th></tr></thead>
+        <thead><tr><th style="width:28px"></th><th>Tarefa</th><th>Responsável</th><th>Status</th><th>Prazo</th><th>Esforço</th><th style="width:150px"></th></tr></thead>
         <tbody>${tasksUnmapped.map(t => renderHierarchicalTaskRow(p, t)).join('')}</tbody>
       </table>
     </div>` : ''}
@@ -6019,7 +6019,7 @@ function renderHierarchicalTaskRow(p, t) {
         <select class="filter-select" style="border:none;background:transparent;font-size:11px;padding:2px 2px;max-width:76px" onchange="mudarStatus('${p.id}','${t.id}',this.value)">
           ${Object.entries(STATUS_MAP).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v.label}</option>`).join('')}
         </select>
-        ${isGestor() ? `<button class="btn btn-sm btn-excluir" title="Excluir tarefa deste projeto" aria-label="Excluir tarefa" onclick="excluirTarefaProjeto('${p.id}','${t.id}')"><i class="ti ti-trash"></i></button>` : ''}
+        ${isGestor() ? `<button class="btn btn-sm btn-excluir" style="font-size:11px" title="Excluir tarefa deste projeto" onclick="excluirTarefaProjeto('${p.id}','${t.id}')"><i class="ti ti-trash"></i> Excluir</button>` : ''}
       </div>
     </td>
   </tr>`;
@@ -7773,7 +7773,7 @@ function renderChecklistTasks(tpl) {
     return `<div style="margin-bottom:16px">
       <div style="font-size:12px;font-weight:700;padding:6px 12px;border-radius:6px;background:${fc.bg};color:${fc.color};margin-bottom:8px;display:inline-block">${fase}</div>
       <table style="width:100%">
-        <thead><tr><th>Tarefa</th><th>Tema</th><th>Macro atividade</th><th>Responsável</th><th>Esforço</th><th style="width:92px"></th></tr></thead>
+        <thead><tr><th>Tarefa</th><th>Tema</th><th>Macro atividade</th><th>Responsável</th><th>Esforço</th><th style="width:150px"></th></tr></thead>
         <tbody>
           ${ts.map(t => `<tr>
             <td style="font-weight:500">${t.tarefa} ${helpIconHTML(t)}</td>
@@ -7786,8 +7786,8 @@ function renderChecklistTasks(tpl) {
             <td style="font-size:12px">${t.esforco||'—'}</td>
             <td style="white-space:nowrap">
               <div style="display:flex;gap:4px">
-                <button class="btn btn-secondary btn-sm" style="padding:3px 7px" title="Editar tarefa" aria-label="Editar tarefa" onclick="modalEditarTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-edit"></i></button>
-                <button class="btn btn-sm btn-excluir" title="Excluir tarefa do template" aria-label="Excluir tarefa" onclick="removerTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-trash"></i></button>
+                <button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" title="Editar tarefa" onclick="modalEditarTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-edit"></i> Editar</button>
+                <button class="btn btn-sm btn-excluir" style="font-size:11px" title="Excluir tarefa do template" onclick="removerTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-trash"></i> Excluir</button>
               </div>
             </td>
           </tr>`).join('')}
