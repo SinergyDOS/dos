@@ -749,7 +749,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-08-08-botoes-rotulo';
+const DOS_BUILD = '2026-10-18-checklist-mergulho';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -822,7 +822,7 @@ function loadState() {
   // ── Template padrão de checklist ──────────────────────────────────────────
   // CHECKLIST_VERSION incrementa quando o checklist padrão muda. Usuários que já
   // têm o portal aberto recebem a versão nova automaticamente, SEM perder projetos.
-  const CHECKLIST_VERSION = 9;
+  const CHECKLIST_VERSION = 10;
   const buildDefaultTemplate = () => ({
     id: 'tpl1',
     nome: 'Checklist Padrão de Implantação',
@@ -876,8 +876,64 @@ function loadState() {
     tasks: DEFAULT_CHECKLIST_TASKS_PONTO_NOVOS.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
     deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_PONTO_NOVOS))
   });
+  // Consolidado Folha + Ponto: combina os dois checklists já existentes, em vez
+  // de manter uma terceira cópia das tarefas (que sairia de sincronia na 1ª edição).
+  // As fases do Ponto que não existem na implantação de Folha são remapeadas.
+  const MAPA_FASE_PONTO = {
+    'Fase 4 - Go live': 'Fase 5 - Go-Live',
+    'Fase 5 - Operação assistida': 'Fase 6 - Operação assistida'
+  };
+  const FASE_TREINAMENTOS = 'Fase 4 - Treinamentos';
+  const MACRO_TREINAMENTOS = 'TREINAMENTO_RH';
+  const ehTreinamento = t => /treinamento/i.test(t.tarefa || '');
+
+  const buildTemplateFolhaPonto = () => {
+    const base = DEFAULT_CHECKLIST_TASKS;
+    const ponto = DEFAULT_CHECKLIST_TASKS_PONTO_NOVOS.map(t => {
+      const { _goLiveMarker, ...resto } = t;   // o marco de Go-live é único, vem da Folha
+      // Num projeto integrado os treinamentos acontecem juntos, na mesma fase,
+      // independentemente do módulo de origem.
+      const fase = ehTreinamento(t) ? FASE_TREINAMENTOS : (MAPA_FASE_PONTO[t.fase] || t.fase);
+      return { ...resto, fase };
+    });
+    const todas = [...base, ...ponto, GOLIVE_MARKER_TASK];
+    const off = base.length;
+    // índices (ct) das tarefas de Ponto que viraram treinamento
+    const ctTreinoPonto = ponto
+      .map((t, i) => (t.fase === FASE_TREINAMENTOS ? 'ct' + (i + off) : null))
+      .filter(Boolean);
+
+    const dep = JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE));
+    DEFAULT_DEPARA_PONTO_NOVOS.forEach(d => {
+      const ids = (d.checklistTaskIds || [])
+        .map(c => 'ct' + (parseInt(c.slice(2), 10) + off))
+        .filter(c => !ctTreinoPonto.includes(c));   // treinamento sai da macro de origem
+      if (!ids.length) return;
+      dep.push({
+        macroKey: 'PONTO_' + d.macroKey,
+        macroNameLabel: 'Ponto — ' + d.macroNameLabel,
+        checklistTaskIds: ids
+      });
+    });
+    // e entra na macro de treinamentos da Folha, consolidando a entrega
+    if (ctTreinoPonto.length) {
+      const mt = dep.find(d => d.macroKey === MACRO_TREINAMENTOS);
+      if (mt) mt.checklistTaskIds = [...mt.checklistTaskIds, ...ctTreinoPonto];
+      else dep.push({ macroKey: MACRO_TREINAMENTOS, macroNameLabel: 'Treinamento RH', checklistTaskIds: ctTreinoPonto });
+    }
+    return {
+      id: 'tpl7',
+      nome: 'Checklist Folha + Ponto (consolidado)',
+      descricao: `Implantação integrada de Folha e Ponto — ${todas.length} atividades, 6 fases`,
+      versao: CHECKLIST_VERSION,
+      tasks: todas.map((t,i) => ({ id:'ct'+i, status:'pendente', prazo:null, help:'', ...t })),
+      deParaTemplate: dep
+    };
+  };
+
   const CONSTRUTORES_TEMPLATE = [
     { id:'tpl1', build: buildDefaultTemplate },
+    { id:'tpl7', build: buildTemplateFolhaPonto },
     { id:'tpl5', build: buildTemplatePontoNexus },
     { id:'tpl6', build: buildTemplatePontoNovos },
     { id:'tpl3', build: buildTemplateRH },
@@ -929,6 +985,7 @@ function loadState() {
     goLive: p.goLive || '',
     consultor: p.consultor || '',
     analista: p.analista || '',
+    techLead: typeof p.techLead === 'string' ? p.techLead : '',
     // Tarefas micro: garante macroActivityId=null em tarefas antigas, sem sobrescrever demais campos
     tasks: (Array.isArray(p.tasks) ? p.tasks : []).map(t => ({
       ...t,
@@ -1143,6 +1200,7 @@ function _mapProjectRow(p, tasksByProject, risksByProject) {
     goLive: p.go_live || '',
     consultor: p.consultor || '',
     analista: p.analista || '',
+    techLead: p.tech_lead || '',
     tasks: tasks,
     templateId: p.template_id || null,
     macroActivities: Array.isArray(p.macro_activities) ? p.macro_activities : [],
@@ -1299,6 +1357,7 @@ function _projetoParaRow(p) {
     go_live: p.goLive || null,
     consultor: p.consultor || '',
     analista: p.analista || '',
+    tech_lead: p.techLead || '',
     template_id: p.templateId || null,
     macro_activities: Array.isArray(p.macroActivities) ? p.macroActivities : [],
     macro_mappings: Array.isArray(p.macroMappings) ? p.macroMappings : [],
@@ -1501,17 +1560,60 @@ function isConsultor() { return state.currentUser?.tipo === 'consultor'; }
 // Projetos visíveis para o usuário atual
 // Compara sem distinção de maiúsculas/minúsculas e espaços extras.
 // Consultor e analista veem projetos onde seu nome está em qualquer um dos campos.
+// Consultor e analista passaram a aceitar mais de uma pessoa, gravadas no mesmo
+// campo separadas por ";". Uma pessoa só continua funcionando como antes.
+function listaPessoas(valor) {
+  return String(valor || '').split(';').map(s => s.trim()).filter(Boolean);
+}
+function pessoaEstaEm(valor, nome) {
+  const n = normalizePersonName(nome);
+  return listaPessoas(valor).some(x => normalizePersonName(x) === n);
+}
+// Papéis que a pessoa exerce neste projeto
+function papeisNoProjeto(p, nome) {
+  const r = [];
+  if (pessoaEstaEm(p?.consultor, nome)) r.push('consultor');
+  if (pessoaEstaEm(p?.analista, nome)) r.push('analista');
+  if (pessoaEstaEm(p?.techLead, nome)) r.push('techlead');
+  return r;
+}
+// Exibição: "Ana Silva · João Souza"
+// Seleção de várias pessoas por papel, em caixas de marcação.
+// Mantém o campo "Outro" para nomes fora da equipe cadastrada.
+function renderPessoasCheckboxes(campo, usuarios, selecionados) {
+  const sel = listaPessoas(selecionados);
+  const selNorm = new Set(sel.map(normalizePersonName));
+  const nomesUsuarios = usuarios.map(u => u.name);
+  const extras = sel.filter(n => !nomesUsuarios.some(u => normalizePersonName(u) === normalizePersonName(n)));
+  return `<div style="border:1px solid var(--gray-200);border-radius:8px;padding:9px 11px;background:#fff;max-height:148px;overflow-y:auto">
+      ${usuarios.length ? usuarios.map((u,i)=>`
+        <label for="${campo}-${i}" style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--gray-700);cursor:pointer;padding:3px 0">
+          <input type="checkbox" id="${campo}-${i}" name="${campo}" value="${u.name.replace(/"/g,'&quot;')}" ${selNorm.has(normalizePersonName(u.name))?'checked':''}>
+          <span>${u.name}</span><span style="color:var(--gray-400);font-size:11px">${u.role||''}</span>
+        </label>`).join('') : '<div style="font-size:12px;color:var(--gray-400)">Nenhuma pessoa com este perfil cadastrada.</div>'}
+    </div>
+    <input class="form-input" id="${campo}-outros" style="margin-top:6px;font-size:12px" placeholder="Outros nomes, separados por ponto e vírgula" value="${extras.join('; ').replace(/"/g,'&quot;')}">`;
+}
+function lerPessoasCheckboxes(campo) {
+  const marcados = [...document.querySelectorAll(`input[name="${campo}"]:checked`)].map(c => c.value);
+  const outros = listaPessoas(document.getElementById(campo+'-outros')?.value || '');
+  const todos = [...marcados, ...outros];
+  const vistos = new Set();
+  return todos.filter(n => { const k = normalizePersonName(n); if (vistos.has(k)) return false; vistos.add(k); return true; }).join('; ');
+}
+
+function exibirPessoas(valor, vazio) {
+  const l = listaPessoas(valor);
+  return l.length ? l.join(' · ') : (vazio === undefined ? '—' : vazio);
+}
+function projetoTemPessoa(p, nome) {
+  return papeisNoProjeto(p, nome).length > 0;
+}
+
 function projetosVisiveis() {
   if (isGestor()) return state.projetos;
-  const nome = (state.currentUser?.name || '').trim().toLowerCase();
-  const tipo  = (state.currentUser?.tipo  || '').toLowerCase();
-  return state.projetos.filter(p => {
-    const pc = (p.consultor || '').trim().toLowerCase();
-    const pa = (p.analista  || '').trim().toLowerCase();
-    if (tipo === 'consultor') return pc === nome || pa === nome;
-    if (tipo === 'analista')  return pa === nome || pc === nome;
-    return false;
-  });
+  const nome = state.currentUser?.name || '';
+  return state.projetos.filter(p => projetoTemPessoa(p, nome));
 }
 
 // Substituída pelo login por e-mail/senha (doLogin). Mantida como atalho do form.
@@ -1578,6 +1680,7 @@ async function logout() {
 
 // ==================== NAVIGATION ====================
 function nav(page) {
+  if (page !== 'checklists') state.checklistAberto = null;
   // Guard: apenas gestor acessa configuração
   if ((page === 'checklists' || page === 'usuarios' || page === 'matriz-alocacao') && !isGestor()) page = 'dashboard';
   // Guard: minhas tarefas só para não-gestores
@@ -1620,6 +1723,7 @@ const FASE_COLORS = {
   // Fases dos checklists de Ponto (Transição Nexus e novos clientes)
   'Fase 4 - Go live': {bg:'#ffedd5',color:'#9a3412'},
   'Fase 5 - Operação assistida': {bg:'#d1fae5',color:'#065f46'},
+  'Fase 6 - Operação assistida': {bg:'#d1fae5',color:'#065f46'},
 };
 const TEMA_COLORS = {
   'Folha':'#2e6ef7','Beneficios':'#16a34a','Contábil':'#7c3aed',
@@ -1980,7 +2084,7 @@ ${semProjeto ? `<div class="alert alert-info" style="margin-bottom:20px"><i clas
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
             <div>
               <div style="font-weight:600;font-size:13px;color:var(--gray-900)">${p.nome}</div>
-              <div style="font-size:11px;color:var(--gray-500)">${p.cliente} · ${p.consultor||'—'}</div>
+              <div style="font-size:11px;color:var(--gray-500)">${p.cliente} · ${exibirPessoas(p.consultor)}</div>
             </div>
             <span style="font-size:12px;font-weight:700;color:${ppct===100?'var(--success)':'var(--accent)'}">${ppct}%</span>
           </div>
@@ -2072,8 +2176,8 @@ function getFilteredExecutiveProjects() {
       const st = getProjectExecutiveStatus(p);
       if (st.key !== f.projectStatus) return false;
     }
-    if (f.consultant && (p.consultor || '') !== f.consultant) return false;
-    if (f.analyst && (p.analista || '') !== f.analyst) return false;
+    if (f.consultant && !pessoaEstaEm(p.consultor, f.consultant)) return false;
+    if (f.analyst && !pessoaEstaEm(p.analista, f.analyst)) return false;
     if (f.riskFilter) {
       const rs = calculateProjectRiskSummary(p);
       if (f.riskFilter === 'com-abertos' && rs.open + rs.monitoring === 0) return false;
@@ -2334,8 +2438,8 @@ function renderExecutiveDashboard() {
 
 function renderExecutiveFilters() {
   const f = state.executiveFilters;
-  const consultores = [...new Set((state.projetos||[]).map(p=>p.consultor).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-  const analistas = [...new Set((state.projetos||[]).map(p=>p.analista).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const consultores = [...new Set((state.projetos||[]).flatMap(p=>listaPessoas(p.consultor)))].sort((a,b)=>a.localeCompare(b));
+  const analistas = [...new Set((state.projetos||[]).flatMap(p=>listaPessoas(p.analista)))].sort((a,b)=>a.localeCompare(b));
   const fases = Object.keys(FASE_COLORS);
   const temFiltro = Object.values(f).some(v => v);
 
@@ -2562,7 +2666,8 @@ function showProjectExecutiveSummary(projectId) {
     </div>
     <table style="width:100%;margin-bottom:14px"><tbody style="font-size:13px">
       <tr><td style="color:var(--gray-500);padding:5px 0">Início</td><td style="text-align:right">${fmt(p.dataInicio)}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Go-live</td><td style="text-align:right">${fmt(p.goLive)}</td></tr>
-      <tr><td style="color:var(--gray-500);padding:5px 0">Consultor</td><td style="text-align:right">${p.consultor||'—'}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Analista</td><td style="text-align:right">${p.analista||'—'}</td></tr>
+      <tr><td style="color:var(--gray-500);padding:5px 0">Consultor</td><td style="text-align:right">${exibirPessoas(p.consultor)}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Analista</td><td style="text-align:right">${exibirPessoas(p.analista)}</td></tr>
+      <tr><td style="color:var(--gray-500);padding:5px 0">Tech lead</td><td style="text-align:right" colspan="3">${exibirPessoas(p.techLead)}</td></tr>
       <tr><td style="color:var(--gray-500);padding:5px 0">Tarefas bloqueadas</td><td style="text-align:right;color:${prog.blockedTasks?'var(--danger)':'inherit'}">${prog.blockedTasks}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Tarefas atrasadas</td><td style="text-align:right;color:${prog.overdueTasks?'var(--danger)':'inherit'}">${prog.overdueTasks}</td></tr>
       <tr><td style="color:var(--gray-500);padding:5px 0">Riscos abertos</td><td style="text-align:right">${rs.open+rs.monitoring}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Impeditivos ativos</td><td style="text-align:right;color:${rs.activeBlockers?'var(--danger)':'inherit'}">${rs.activeBlockers}</td></tr>
       <tr><td style="color:var(--gray-500);padding:5px 0">Macro entregas atrasadas</td><td style="text-align:right">${macroAtrasadas}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Riscos vencidos</td><td style="text-align:right">${rs.overdue}</td></tr>
@@ -2954,8 +3059,8 @@ function renderProjetos() {
             ${renderProjectModules(p, {compact:true, hideWhenEmpty:true})}
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;font-size:12px">
-            <div><span style="color:var(--gray-400)">Consultor: </span><span style="color:var(--gray-700);font-weight:500">${p.consultor||'—'}</span></div>
-            <div><span style="color:var(--gray-400)">Analista: </span><span style="color:var(--gray-700);font-weight:500">${p.analista||'—'}</span></div>
+            <div><span style="color:var(--gray-400)">Consultor: </span><span style="color:var(--gray-700);font-weight:500">${exibirPessoas(p.consultor)}</span></div>
+            <div><span style="color:var(--gray-400)">Analista: </span><span style="color:var(--gray-700);font-weight:500">${exibirPessoas(p.analista)}</span></div>
             <div><span style="color:var(--gray-400)">Início: </span><span>${fmt(p.dataInicio)}</span></div>
             <div><span style="color:var(--gray-400)">Go-live: </span><span>${fmt(p.goLive)}</span></div>
           </div>
@@ -3273,6 +3378,7 @@ function renderProjectForm(editId = null) {
   const icone = p ? 'ti-edit' : 'ti-folder-plus';
 
   // separa consultores/analistas por tipo para ordenar a lista
+  const gestores = users.filter(u => (u.tipo||'').toLowerCase() === 'gestor');
   const consultores = users.filter(u => (u.tipo||'').toLowerCase() === 'consultor');
   const analistas   = users.filter(u => (u.tipo||'').toLowerCase() === 'analista');
   const outros      = users.filter(u => !['consultor','analista'].includes((u.tipo||'').toLowerCase()));
@@ -3313,20 +3419,18 @@ function renderProjectForm(editId = null) {
       <div class="form-group"><label class="form-label">Data de início <span class="req-star">*</span></label><input type="date" class="form-input" id="pInicio" value="${p?(p.dataInicio||''):''}"><div class="field-error-msg" id="err-pInicio" style="display:none"><i class="ti ti-alert-triangle"></i>Campo obrigatório</div></div>
       <div class="form-group"><label class="form-label">Data Go-live <span class="req-star">*</span></label><input type="date" class="form-input" id="pGoLive" value="${p?(p.goLive||''):''}"><div class="field-error-msg" id="err-pGoLive" style="display:none"><i class="ti ti-alert-triangle"></i>Campo obrigatório</div></div>
     </div>
+    <div class="form-group">
+      <label class="form-label"><i class="ti ti-user-star" style="font-size:13px;color:var(--gray-500);margin-right:4px"></i>Tech lead do projeto</label>
+      ${renderPessoasCheckboxes('pTechLead', gestores, p ? (p.techLead||'') : '')}
+    </div>
     <div class="form-grid">
       <div class="form-group"><label class="form-label">Consultor responsável</label>
-        <select class="form-input form-select" id="pConsultor">
-          ${buildRespOptions(consultores, consultorCustom ? '__none__' : consultorSalvo)}
-          <option value="__custom" ${consultorCustom?'selected':''}>Outro (digitar)</option>
-        </select></div>
+        ${renderPessoasCheckboxes('pConsultor', consultores, consultorSalvo)}
+        <div style="font-size:11px;color:var(--gray-400);margin-top:4px">Pode marcar mais de uma pessoa.</div></div>
       <div class="form-group"><label class="form-label">Analista responsável</label>
-        <select class="form-input form-select" id="pAnalista">
-          ${buildRespOptions(analistas, analistaCustom ? '__none__' : analistaSalvo)}
-          <option value="__custom" ${analistaCustom?'selected':''}>Outro (digitar)</option>
-        </select></div>
+        ${renderPessoasCheckboxes('pAnalista', analistas, analistaSalvo)}
+        <div style="font-size:11px;color:var(--gray-400);margin-top:4px">Pode marcar mais de uma pessoa.</div></div>
     </div>
-    <div id="pConsultorCustomDiv" class="form-group ${consultorCustom?'':'hidden'}"><label class="form-label">Nome do consultor</label><input class="form-input" id="pConsultorCustom" value="${consultorCustom?consultorSalvo.replace(/"/g,'&quot;'):''}"></div>
-    <div id="pAnalistaCustomDiv" class="form-group ${analistaCustom?'':'hidden'}"><label class="form-label">Nome do analista</label><input class="form-input" id="pAnalistaCustom" value="${analistaCustom?analistaSalvo.replace(/"/g,'&quot;'):''}"></div>
     ${modo === 'criacao' ? `<div class="form-group"><label class="form-label">Template de checklist</label>
       <select class="form-input form-select" id="pTemplate">
         <option value="">Sem template</option>
@@ -3338,14 +3442,7 @@ function renderProjectForm(editId = null) {
     <button class="btn btn-primary" id="pBtnSalvar" onclick="salvarProjeto(${p ? `'${p.id}'` : ''})"><i class="ti ti-check"></i> ${btnLabel}</button>
   </div>`);
 
-  document.getElementById('pConsultor').onchange = function(){
-    document.getElementById('pConsultorCustomDiv').classList.toggle('hidden', this.value!=='__custom');
-    if (this.value !== '__custom') { const inp = document.getElementById('pConsultorCustom'); if (inp) inp.value = ''; }
-  };
-  document.getElementById('pAnalista').onchange = function(){
-    document.getElementById('pAnalistaCustomDiv').classList.toggle('hidden', this.value!=='__custom');
-    if (this.value !== '__custom') { const inp = document.getElementById('pAnalistaCustom'); if (inp) inp.value = ''; }
-  };
+
   ['pNome','pCliente','pInicio','pGoLive'].forEach(fid => {
     const f = document.getElementById(fid);
     if (f) f.addEventListener('input', () => limparErroCampo(fid));
@@ -3435,12 +3532,9 @@ async function salvarProjeto(editId) {
     const cliente = el('pCliente').value.trim();
     const modulos = getSelectedProjectModules();
     const itensCustomizados = (el('pItensCustomizados')?.value || '').trim();
-    let consultor = (el('pConsultor')?.value || '').trim();
-    if (consultor === '__custom') consultor = (el('pConsultorCustom')?.value || '').trim();
-    else if (consultor === '__none__') consultor = '';
-    let analista = (el('pAnalista')?.value || '').trim();
-    if (analista === '__custom') analista = (el('pAnalistaCustom')?.value || '').trim();
-    else if (analista === '__none__') analista = '';
+    const consultor = lerPessoasCheckboxes('pConsultor');
+    const analista = lerPessoasCheckboxes('pAnalista');
+    const techLead = lerPessoasCheckboxes('pTechLead');
 
     if (!Array.isArray(state.projetos)) state.projetos = [];
 
@@ -3467,7 +3561,7 @@ async function salvarProjeto(editId) {
         else alert('Não foi possível salvar: ' + res.error);
         return;
       }
-      Object.assign(p, { nome, cliente, modulos, itensCustomizados, dataInicio, goLive, consultor, analista, atualizadoEm: new Date().toISOString() });
+      Object.assign(p, { nome, cliente, modulos, itensCustomizados, dataInicio, goLive, consultor, analista, techLead, atualizadoEm: new Date().toISOString() });
       contexto = (state.currentProjetoId === editId && state.currentPage === 'projeto-detalhe') ? 'detalhe' : 'lista';
     } else {
       const tplId = el('pTemplate')?.value || '';
@@ -3477,7 +3571,7 @@ async function salvarProjeto(editId) {
         : [];
       const novo = {
         id:uid(), nome, cliente, modulos, itensCustomizados, dataInicio, goLive,
-        consultor, analista, tasks, templateId: tplId || null,
+        consultor, analista, techLead, tasks, templateId: tplId || null,
         macroActivities: [], macroMappings: [], risks: [], criadoEm: new Date().toISOString()
       };
       // O cronograma macro nasce do próprio checklist — sem depender de importação.
@@ -3581,8 +3675,9 @@ function renderProjetoDetail(p) {
   </div>
   <div class="progress" style="height:8px"><div class="progress-bar${pct===100?' green':''}" style="width:${pct}%"></div></div>
   <div style="display:flex;gap:16px;margin-top:10px;font-size:12px;color:var(--gray-500)">
-    <span><i class="ti ti-user" style="margin-right:4px"></i>Consultor: <strong>${p.consultor||'—'}</strong></span>
-    <span><i class="ti ti-user" style="margin-right:4px"></i>Analista: <strong>${p.analista||'—'}</strong></span>
+    <span><i class="ti ti-user" style="margin-right:4px"></i>Consultor: <strong>${exibirPessoas(p.consultor)}</strong></span>
+    <span><i class="ti ti-user" style="margin-right:4px"></i>Analista: <strong>${exibirPessoas(p.analista)}</strong></span>
+    ${listaPessoas(p.techLead).length?`<span><i class="ti ti-user-star" style="margin-right:4px"></i>Tech lead: <strong>${exibirPessoas(p.techLead)}</strong></span>`:''}
   </div>
 </div>
 
@@ -3824,7 +3919,7 @@ function renderGanttCronograma(p, macros) {
       else if (b) barra = `<div style="position:absolute;top:9px;left:${_ganttPct(b,intervalo)}%;width:11px;height:11px;transform:translateX(-50%) rotate(45deg);background:${corBarra};border-radius:1px"></div>`;
       const semData = !a && !b;
       const nTar = dd ? dd.progress.totalTasks : 0;
-      linhas.push(`<div class="gt-row" ${isGestor()?`onclick="modalEditarDatasMacro('${p.id}','${m.id}')" style="cursor:pointer" title="Editar datas e replanejar as tarefas"`:''}>
+      linhas.push(`<div class="gt-row">
         <div class="gt-lf" style="padding-left:26px">
           <span class="gt-nm">${m.name || '—'}</span>
           ${semData ? '<span class="badge badge-gray" style="font-size:9px">sem data</span>' : ''}
@@ -3878,6 +3973,119 @@ function simularImpactoPrazo(p, macro, novoFim) {
     res.alteradas.push({ tarefa: t.tarefa, de: t.prazo, para: novoFim });
   });
   return res;
+}
+
+// Edição em lote: libera todas as datas de uma vez e aplica tudo num único salvar.
+function entrarModoEdicaoDatas(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode alterar o cronograma.', 'erro'); return; }
+  state.cronoEdicao = true;
+  renderProjetoDetail(state.projetos.find(x => x.id === pId));
+}
+function sairModoEdicaoDatas(pId) {
+  state.cronoEdicao = false;
+  renderProjetoDetail(state.projetos.find(x => x.id === pId));
+}
+
+// Resumo do que muda: lê os campos da tela e compara com o que está gravado
+function _coletarEdicoesDatas(p) {
+  const mudancas = [];
+  (p.macroActivities || []).forEach(m => {
+    const ini = document.getElementById('ed-ini-' + m.id);
+    const fim = document.getElementById('ed-fim-' + m.id);
+    if (!ini || !fim) return;
+    const novoIni = ini.value || null;
+    const novoFim = fim.value || null;
+    if (novoIni !== (m.startDate || null) || novoFim !== (m.endDate || null)) {
+      mudancas.push({ macro: m, novoIni, novoFim });
+    }
+  });
+  return mudancas;
+}
+
+// Confirmação em modal próprio: o confirm() nativo é bloqueado em alguns
+// contextos (iframes, visualizações incorporadas) e falha em silêncio.
+function salvarTodasDatasMacro(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode alterar o cronograma.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  const mudancas = _coletarEdicoesDatas(p);
+  if (!mudancas.length) { sairModoEdicaoDatas(pId); notificar('Nenhuma data foi alterada.', 'sucesso'); return; }
+
+  const invalida = mudancas.find(c => c.novoIni && c.novoFim && c.novoFim < c.novoIni);
+  if (invalida) { notificar(`"${invalida.macro.name}": o término não pode ser anterior ao início.`, 'erro'); return; }
+
+  let totalAlteradas = 0, totalPreservadas = 0;
+  mudancas.forEach(c => {
+    if (!c.novoFim) return;
+    const s = simularImpactoPrazo(p, c.macro, c.novoFim);
+    totalAlteradas += s.alteradas.length;
+    totalPreservadas += s.concluidas + s.manuais;
+  });
+  // guarda o que foi digitado: o modal substitui o conteúdo da tela
+  _edicoesPendentes = mudancas.map(c => ({ macroId: c.macro.id, novoIni: c.novoIni, novoFim: c.novoFim }));
+
+  const lista = mudancas.slice(0, 8).map(c =>
+    `<div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:3px 0;border-top:1px solid var(--gray-100)">
+      <span style="color:var(--gray-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.macro.name}</span>
+      <span style="color:var(--gray-500);white-space:nowrap">${c.novoIni?fmt(c.novoIni):'—'} a <strong style="color:var(--accent)">${c.novoFim?fmt(c.novoFim):'—'}</strong></span>
+    </div>`).join('');
+
+  openModal(`<div class="modal-header">
+    <div class="modal-title"><i class="ti ti-calendar-event" style="margin-right:8px;color:var(--accent)"></i>Confirmar replanejamento</div>
+    <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="modal-body">
+    <div style="font-size:13px;color:var(--gray-700);line-height:1.7;margin-bottom:12px">
+      <strong>${mudancas.length}</strong> atividade(s) macro terão as datas alteradas.<br>
+      <strong style="color:var(--accent)">${totalAlteradas}</strong> prazo(s) de tarefa serão replanejados.<br>
+      ${totalPreservadas} preservado(s) — já concluídas ou com prazo manual.
+    </div>
+    <div style="background:var(--gray-50);border-radius:8px;padding:10px 12px">
+      ${lista}${mudancas.length>8?`<div style="font-size:11px;color:var(--gray-400);padding-top:5px">e mais ${mudancas.length-8}...</div>`:''}
+    </div>
+    <div style="font-size:11.5px;color:var(--gray-400);margin-top:10px">Esta ação não pode ser desfeita.</div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" id="cdBtn" onclick="aplicarDatasEmLote('${pId}')"><i class="ti ti-check"></i> Aplicar e replanejar</button>
+  </div>`);
+}
+
+let _edicoesPendentes = null;
+
+async function aplicarDatasEmLote(pId) {
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p || !_edicoesPendentes) return;
+  const btn = document.getElementById('cdBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Aplicando...'; }
+  const mudancas = _edicoesPendentes.map(e => ({
+    macro: (p.macroActivities || []).find(m => m.id === e.macroId),
+    novoIni: e.novoIni, novoFim: e.novoFim
+  })).filter(c => c.macro);
+
+  const antes = (p.macroActivities || []).map(m => ({ id:m.id, startDate:m.startDate, endDate:m.endDate }));
+  const agora = new Date().toISOString();
+  mudancas.forEach(c => {
+    c.macro.startDate = c.novoIni;
+    c.macro.endDate = c.novoFim;
+    c.macro.lastUpdatedAt = agora;
+  });
+  const atualizadas = propagarPrazosMacro(p);
+
+  const res = await persistirCronograma(p);
+  if (!res.ok) {
+    antes.forEach(a => { const m = p.macroActivities.find(x => x.id === a.id); if (m) { m.startDate = a.startDate; m.endDate = a.endDate; } });
+    propagarPrazosMacro(p);
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> Aplicar e replanejar'; }
+    notificar('Não foi possível salvar: ' + res.error + ' Recarregue a página para conferir.', 'erro');
+    return;
+  }
+  _edicoesPendentes = null;
+  state.cronoEdicao = false;
+  saveState();
+  closeModal();
+  renderProjetoDetail(p);
+  notificar(`${mudancas.length} atividade(s) atualizada(s). ${atualizadas} prazo(s) de tarefa replanejado(s).`, 'sucesso');
 }
 
 function modalEditarDatasMacro(pId, macroId) {
@@ -4434,8 +4642,12 @@ function renderCronogramaMacro(p) {
       <td style="font-weight:500;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(m.name||'').replace(/"/g,'&quot;')}">${m.name || '—'}
         ${naoEncontrada ? `<span class="badge badge-red" style="font-size:9px;margin-left:4px" title="Não encontrada na última importação"><i class="ti ti-alert-triangle"></i>não encontrada</span>` : ''}
       </td>
-      <td style="font-size:12px;color:${m.startDate?'var(--gray-600)':'var(--gray-300)'}">${m.startDate?fmt(m.startDate):'—'}</td>
-      <td style="font-size:12px;color:${m.endDate?'var(--gray-600)':'var(--gray-300)'}">${m.endDate?fmt(m.endDate):'—'}</td>
+      <td style="font-size:12px;color:${m.startDate?'var(--gray-600)':'var(--gray-300)'}">${state.cronoEdicao
+        ? `<input type="date" class="form-input" style="padding:3px 6px;font-size:12px" id="ed-ini-${m.id}" value="${m.startDate||''}">`
+        : (m.startDate?fmt(m.startDate):'—')}</td>
+      <td style="font-size:12px;color:${m.endDate?'var(--gray-600)':'var(--gray-300)'}">${state.cronoEdicao
+        ? `<input type="date" class="form-input" style="padding:3px 6px;font-size:12px" id="ed-fim-${m.id}" value="${m.endDate||''}">`
+        : (m.endDate?fmt(m.endDate):'—')}</td>
       <td>
         <div style="display:flex;align-items:center;gap:6px">
           <div class="progress" style="flex:1"><div class="progress-bar${prog===100?' green':''}" style="width:${prog}%"></div></div>
@@ -4444,7 +4656,6 @@ function renderCronogramaMacro(p) {
       </td>
       <td style="font-size:12px;color:var(--gray-600);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(m.responsible||'').replace(/"/g,'&quot;')}">${m.responsible || '—'}</td>
       <td style="white-space:nowrap">${vincBadge}</td>
-      <td style="white-space:nowrap">${isGestor() ? `<button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" title="Editar datas e replanejar as tarefas" onclick="modalEditarDatasMacro('${p.id}','${m.id}')"><i class="ti ti-calendar-event"></i> Datas</button>` : ''}</td>
     </tr>`;
   }).join('');
 
@@ -4459,7 +4670,13 @@ function renderCronogramaMacro(p) {
           <button class="tab ${state.ganttEscala!=='semana'?'active':''}" style="padding:5px 10px;font-size:12px" onclick="setGanttEscala('mes')">Mês</button>
           <button class="tab ${state.ganttEscala==='semana'?'active':''}" style="padding:5px 10px;font-size:12px" onclick="setGanttEscala('semana')">Semana</button>
         </div>` : ''}
-        <span style="font-size:12px;color:var(--gray-400)">${macros.length} atividade${macros.length>1?'s':''}${isGestor()?' · clique numa atividade para ajustar datas':''}</span>
+        <span style="font-size:12px;color:var(--gray-400)">${macros.length} atividade${macros.length>1?'s':''}</span>
+        ${isGestor() ? (state.cronoEdicao
+          ? `<span style="display:flex;gap:6px">
+               <button class="btn btn-secondary btn-sm" onclick="sairModoEdicaoDatas('${p.id}')">Cancelar</button>
+               <button class="btn btn-primary btn-sm" onclick="salvarTodasDatasMacro('${p.id}')"><i class="ti ti-check"></i> Salvar e replanejar</button>
+             </span>`
+          : `<button class="btn btn-secondary btn-sm" onclick="entrarModoEdicaoDatas('${p.id}')"><i class="ti ti-calendar-event"></i> Editar datas</button>`) : ''}
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-secondary btn-sm" onclick="modalConfigurarDePara('${p.id}')"><i class="ti ti-arrows-exchange"></i> Configurar DE-PARA</button>
@@ -4467,7 +4684,11 @@ function renderCronogramaMacro(p) {
         <button class="btn btn-secondary btn-sm" style="color:var(--danger)" onclick="limparCronogramaMacro('${p.id}')"><i class="ti ti-trash"></i> Limpar cronograma</button>
       </div>
     </div>
-    ${state.ganttModo!=='tabela' ? renderGanttCronograma(p, macros) : `
+    ${(state.ganttModo!=='tabela' && !state.cronoEdicao) ? renderGanttCronograma(p, macros) : `
+    ${state.cronoEdicao?`<div class="card" style="margin-bottom:12px;padding:10px 14px;background:#fffbeb;border-color:#fed7aa">
+      <div style="font-size:12.5px;color:#92400e"><i class="ti ti-pencil" style="font-size:13px;vertical-align:-2px"></i>
+        Modo de edição: ajuste as datas que precisar e clique em <strong>Salvar e replanejar</strong>. As tarefas concluídas e as com prazo manual são preservadas.</div>
+    </div>`:''}
     <div class="card" style="padding:0;overflow:hidden">
       <div class="table-wrap">
         <table style="width:100%;table-layout:fixed;min-width:820px">
@@ -4477,8 +4698,7 @@ function renderCronogramaMacro(p) {
             <th style="width:10%">Término</th>
             <th style="width:15%">Progresso</th>
             <th style="width:16%">Responsável</th>
-            <th style="width:12%">Vinculação</th>
-            <th style="width:10%"></th>
+            <th style="width:22%">Vinculação</th>
           </tr></thead>
           <tbody>${linhas}</tbody>
         </table>
@@ -6558,21 +6778,12 @@ function _mdScoreTarefa(p, t, ctx) {
 }
 
 // O usuário é consultor ou analista deste projeto?
-function _mdSouDoProjeto(p, nome) {
-  const n = normalizePersonName(nome);
-  return normalizePersonName(p.consultor) === n || normalizePersonName(p.analista) === n;
-}
+function _mdSouDoProjeto(p, nome) { return projetoTemPessoa(p, nome); }
 // Papéis que o usuário exerce NESTE projeto ('consultor' e/ou 'analista').
 // A regra geral do sistema compara com o perfil cadastrado; aqui usamos o papel
 // real no projeto, senão uma analista que atua como consultora não veria as
 // tarefas marcadas como "Consultor".
-function _mdPapeisNoProjeto(p, nome) {
-  const n = normalizePersonName(nome);
-  const papeis = [];
-  if (normalizePersonName(p.consultor) === n) papeis.push('consultor');
-  if (normalizePersonName(p.analista) === n) papeis.push('analista');
-  return papeis;
-}
+function _mdPapeisNoProjeto(p, nome) { return papeisNoProjeto(p, nome); }
 // A pessoa corresponde a esta parte do campo responsável?
 // Casa por nome próprio, pelo perfil cadastrado ou pelo papel exercido no projeto.
 function _mdCasaResponsavel(p, nome, parte) {
@@ -6650,13 +6861,13 @@ function _mdPessoaDaTarefa(p, t) {
   const daEquipe = partes.filter(x => x.toLowerCase() !== 'cliente');
   // Tarefa só do cliente: quem o gestor cobra é quem toca o projeto.
   if (!daEquipe.length) {
-    const dono = p.consultor || p.analista;
+    const dono = listaPessoas(p.consultor).concat(listaPessoas(p.analista))[0];
     return dono ? `${dono} (cobrar cliente)` : 'Sem responsável definido';
   }
   const nomes = daEquipe.map(parte => {
     const l = parte.toLowerCase();
-    if (l === 'consultor') return p.consultor || 'Consultor (não definido)';
-    if (l === 'analista') return p.analista || 'Analista (não definido)';
+    if (l === 'consultor') return listaPessoas(p.consultor).join(' · ') || 'Consultor (não definido)';
+    if (l === 'analista') return listaPessoas(p.analista).join(' · ') || 'Analista (não definido)';
     return parte;
   });
   return [...new Set(nomes)].join(' · ');
@@ -6677,8 +6888,8 @@ function montarMeuDia() {
   if (gestor) {
     if (f.modulo)    projetos = projetos.filter(p => projectHasModule(p, f.modulo));
     if (f.projeto)   projetos = projetos.filter(p => p.id === f.projeto);
-    if (f.consultor) projetos = projetos.filter(p => normalizePersonName(p.consultor) === normalizePersonName(f.consultor));
-    if (f.analista)  projetos = projetos.filter(p => normalizePersonName(p.analista) === normalizePersonName(f.analista));
+    if (f.consultor) projetos = projetos.filter(p => pessoaEstaEm(p.consultor, f.consultor));
+    if (f.analista)  projetos = projetos.filter(p => pessoaEstaEm(p.analista, f.analista));
   }
 
   const destravar = [], despachar = [], fazer = [], radar = [];
@@ -6825,8 +7036,8 @@ function renderMeuDia() {
     const abertos = _mdProjetosAbertos(f.modulo);      // já filtrados pelo módulo e ordenados por Go-live
     const todos = projetosVisiveis();
     const uniq = arr => [...new Set(arr.filter(Boolean).map(x => String(x).trim()))].sort((a,b)=>a.localeCompare(b));
-    const consultores = uniq(todos.map(p => p.consultor));
-    const analistas   = uniq(todos.map(p => p.analista));
+    const consultores = uniq(todos.flatMap(p => listaPessoas(p.consultor)));
+    const analistas   = uniq(todos.flatMap(p => listaPessoas(p.analista)));
     const ativo = f.modulo || f.projeto || f.consultor || f.analista;
     filtros = `<div class="card" style="margin-bottom:14px;padding:11px 14px">
       <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
@@ -7738,68 +7949,136 @@ function fecharDeParaTpl() {
 // ==================== CHECKLISTS ====================
 function renderChecklists() {
   if (!isGestor()) { nav('dashboard'); return; }
+  // Mergulha num template específico quando há um aberto
+  if (state.checklistAberto) {
+    const tpl = (state.checklistTemplates||[]).find(t => t.id === state.checklistAberto);
+    if (tpl) { renderChecklistDetalhe(tpl); return; }
+    state.checklistAberto = null;
+  }
   document.getElementById('topbar-actions').innerHTML = `
     <button class="btn btn-primary" onclick="modalNovoChecklist()"><i class="ti ti-plus"></i> Novo template</button>`;
 
-  const tpls = state.checklistTemplates;
+  const tpls = state.checklistTemplates || [];
   document.getElementById('page-content').innerHTML = `
     <div class="alert alert-info"><i class="ti ti-info-circle"></i> Templates de checklist são aplicados automaticamente quando um novo projeto é criado.</div>
     ${tpls.length === 0 ? `<div class="card"><div class="empty"><i class="ti ti-checklist"></i><p>Nenhum template cadastrado</p></div></div>` :
-      tpls.map(tpl => `<div class="card" style="margin-bottom:16px">
-        <div class="card-header">
-          <div>
-            <div class="card-title">${tpl.nome}</div>
-            <div style="font-size:12px;color:var(--gray-500);margin-top:2px">${tpl.descricao||''} · ${tpl.tasks.length} tarefas${(tpl.deParaTemplate&&tpl.deParaTemplate.length)?` · ${tpl.deParaTemplate.length} vínculo(s) DE-PARA`:''}</div>
+      `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px">
+      ${tpls.map(tpl => {
+        const nFases = new Set(tpl.tasks.map(t => t.fase)).size;
+        const nMacros = (tpl.deParaTemplate||[]).length;
+        return `<div class="card" style="cursor:pointer;display:flex;flex-direction:column;gap:10px" onclick="abrirChecklist('${tpl.id}')">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <div style="width:36px;height:36px;border-radius:9px;background:var(--accent-light);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <i class="ti ti-checklist" style="color:var(--accent);font-size:18px"></i></div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:600;color:var(--gray-800)">${tpl.nome}</div>
+              <div style="font-size:11.5px;color:var(--gray-400);margin-top:2px">${tpl.descricao||''}</div>
+            </div>
+            <i class="ti ti-chevron-right" style="color:var(--gray-300);font-size:16px"></i>
           </div>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-secondary btn-sm" onclick="expandirChecklist('${tpl.id}')"><i class="ti ti-eye"></i> Ver tarefas</button>
-            <button class="btn btn-secondary btn-sm" onclick="modalDeParaTemplate('${tpl.id}')"><i class="ti ti-arrows-exchange"></i> DE-PARA padrão</button>
-            <button class="btn btn-secondary btn-sm" onclick="modalEditarChecklist('${tpl.id}')"><i class="ti ti-edit"></i> Editar</button>
-            <button class="btn btn-secondary btn-sm" onclick="modalAdicionarTarefaChecklist('${tpl.id}')"><i class="ti ti-plus"></i> Tarefa</button>
+          <div style="display:flex;gap:14px;font-size:11.5px;color:var(--gray-500);border-top:1px solid var(--gray-100);padding-top:9px">
+            <span><strong style="color:var(--gray-700)">${tpl.tasks.length}</strong> tarefas</span>
+            <span><strong style="color:var(--gray-700)">${nFases}</strong> fases</span>
+            <span><strong style="color:var(--gray-700)">${nMacros}</strong> macro atividades</span>
           </div>
-        </div>
-        <div id="cl-${tpl.id}" class="hidden">
-          <hr class="divider">
-          ${renderChecklistTasks(tpl)}
-        </div>
-      </div>`).join('')}`;
+        </div>`;
+      }).join('')}
+      </div>`}`;
 }
 
-function renderChecklistTasks(tpl) {
-  const byFase = {};
-  tpl.tasks.forEach(t => { if(!byFase[t.fase]) byFase[t.fase]=[]; byFase[t.fase].push(t); });
-  return Object.entries(byFase).map(([fase, ts]) => {
-    const fc = FASE_COLORS[fase]||{bg:'#f1f5f9',color:'#64748b'};
-    return `<div style="margin-bottom:16px">
-      <div style="font-size:12px;font-weight:700;padding:6px 12px;border-radius:6px;background:${fc.bg};color:${fc.color};margin-bottom:8px;display:inline-block">${fase}</div>
-      <table style="width:100%">
-        <thead><tr><th>Tarefa</th><th>Tema</th><th>Macro atividade</th><th>Responsável</th><th>Esforço</th><th style="width:150px"></th></tr></thead>
-        <tbody>
-          ${ts.map(t => `<tr>
-            <td style="font-weight:500">${t.tarefa} ${helpIconHTML(t)}</td>
-            <td><span class="badge" style="background:${(TEMA_COLORS[t.tema]||'#64748b')}18;color:${TEMA_COLORS[t.tema]||'#64748b'}">${t.tema}</span></td>
-            <td style="font-size:12px;color:var(--gray-600)">${(() => {
-              const dd = (tpl.deParaTemplate||[]).find(x => (x.checklistTaskIds||[]).includes(t.id));
-              return dd ? dd.macroNameLabel : '<span style="color:var(--gray-300)">sem vínculo</span>';
-            })()}</td>
-            <td style="font-size:12px">${t.responsavel||'—'}</td>
-            <td style="font-size:12px">${t.esforco||'—'}</td>
-            <td style="white-space:nowrap">
-              <div style="display:flex;gap:4px">
-                <button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" title="Editar tarefa" onclick="modalEditarTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-edit"></i> Editar</button>
-                <button class="btn btn-sm btn-excluir" style="font-size:11px" title="Excluir tarefa do template" onclick="removerTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-trash"></i> Excluir</button>
-              </div>
-            </td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
+function abrirChecklist(tplId) { state.checklistAberto = tplId; state.clExpFase = {}; state.clExpMacro = {}; renderChecklists(); }
+function voltarChecklists() { state.checklistAberto = null; renderChecklists(); }
+function toggleClFase(f) { state.clExpFase = state.clExpFase || {}; state.clExpFase[f] = !state.clExpFase[f]; renderChecklists(); }
+function toggleClMacro(k) { state.clExpMacro = state.clExpMacro || {}; state.clExpMacro[k] = !state.clExpMacro[k]; renderChecklists(); }
+function expandirTudoChecklist(tplId, abrir) {
+  const tpl = (state.checklistTemplates||[]).find(t => t.id === tplId);
+  if (!tpl) return;
+  state.clExpFase = {}; state.clExpMacro = {};
+  if (abrir) {
+    new Set(tpl.tasks.map(t => t.fase)).forEach(f => { state.clExpFase[f] = true; });
+    (tpl.deParaTemplate||[]).forEach(d => { state.clExpMacro[d.macroKey] = true; });
+    state.clExpMacro['__sem__'] = true;
+  }
+  renderChecklists();
+}
+
+// Detalhe: Fase → Macro atividade → Tarefa, cada nível expansível
+function renderChecklistDetalhe(tpl) {
+  document.getElementById('topbar-actions').innerHTML = `
+    <button class="btn btn-secondary btn-sm" onclick="voltarChecklists()"><i class="ti ti-arrow-left"></i> Templates</button>
+    <button class="btn btn-secondary btn-sm" onclick="modalDeParaTemplate('${tpl.id}')"><i class="ti ti-arrows-exchange"></i> DE-PARA padrão</button>
+    <button class="btn btn-secondary btn-sm" onclick="modalEditarChecklist('${tpl.id}')"><i class="ti ti-edit"></i> Editar template</button>
+    <button class="btn btn-primary btn-sm" onclick="modalAdicionarTarefaChecklist('${tpl.id}')"><i class="ti ti-plus"></i> Nova tarefa</button>`;
+
+  const expF = state.clExpFase || {}, expM = state.clExpMacro || {};
+  const macroDaTarefa = {};
+  (tpl.deParaTemplate||[]).forEach(d => (d.checklistTaskIds||[]).forEach(c => { macroDaTarefa[c] = d; }));
+  const fases = _ordenarFases([...new Set(tpl.tasks.map(t => t.fase).filter(Boolean))]);
+
+  const blocos = fases.map(fase => {
+    const daFase = tpl.tasks.filter(t => t.fase === fase);
+    const fc = FASE_COLORS[fase] || {bg:'var(--gray-100)',color:'var(--gray-600)'};
+    // agrupa por macro, preservando a ordem do checklist
+    const grupos = []; const idx = {};
+    daFase.forEach(t => {
+      const d = macroDaTarefa[t.id];
+      const chave = d ? d.macroKey : '__sem__';
+      if (idx[chave] === undefined) { idx[chave] = grupos.length; grupos.push({ chave, nome: d ? d.macroNameLabel : 'Sem vínculo com macro atividade', tarefas: [] }); }
+      grupos[idx[chave]].tarefas.push(t);
+    });
+    const aberta = expF[fase] === true;
+    const corpo = !aberta ? '' : grupos.map(g => {
+      const abertaM = expM[g.chave] === true;
+      return `<div style="border-top:1px solid var(--gray-100)">
+        <div onclick="toggleClMacro('${g.chave.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:8px;padding:8px 14px 8px 30px;cursor:pointer;background:var(--gray-50)">
+          <i class="ti ti-chevron-${abertaM?'down':'right'}" style="font-size:13px;color:var(--gray-400)"></i>
+          <span style="font-size:12.5px;font-weight:600;color:${g.chave==='__sem__'?'var(--gray-400)':'var(--gray-700)'}">${g.nome}</span>
+          <span style="margin-left:auto;font-size:11px;color:var(--gray-400)">${g.tarefas.length} tarefa${g.tarefas.length!==1?'s':''}</span>
+        </div>
+        ${!abertaM ? '' : `<div style="padding:0 14px 10px 30px">
+          <table style="width:100%;table-layout:fixed">
+            <colgroup><col style="width:42%"><col style="width:13%"><col style="width:17%"><col style="width:10%"><col style="width:18%"></colgroup>
+            <thead><tr><th>Tarefa</th><th>Tema</th><th>Responsável</th><th>Esforço</th><th></th></tr></thead>
+            <tbody>${g.tarefas.map(t => `<tr>
+              <td style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(t.tarefa||'').replace(/"/g,'&quot;')}">${t.tarefa} ${helpIconHTML(t)}</td>
+              <td><span class="badge" style="background:${(TEMA_COLORS[t.tema]||'#64748b')}18;color:${TEMA_COLORS[t.tema]||'#64748b'}">${t.tema}</span></td>
+              <td style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.responsavel||'—'}</td>
+              <td style="font-size:12px">${t.esforco||'—'}</td>
+              <td style="white-space:nowrap"><div style="display:flex;gap:4px">
+                <button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" onclick="modalEditarTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-edit"></i> Editar</button>
+                <button class="btn btn-sm btn-excluir" style="font-size:11px" onclick="removerTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-trash"></i> Excluir</button>
+              </div></td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`}
+      </div>`;
+    }).join('');
+
+    return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+      <div onclick="toggleClFase('${fase.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:9px;padding:11px 14px;cursor:pointer;background:${fc.bg}">
+        <i class="ti ti-chevron-${aberta?'down':'right'}" style="font-size:15px;color:${fc.color}"></i>
+        <span style="font-size:13px;font-weight:700;color:${fc.color}">${fase}</span>
+        <span style="margin-left:auto;font-size:11.5px;color:${fc.color};opacity:.8">${grupos.length} macro${grupos.length!==1?'s':''} · ${daFase.length} tarefa${daFase.length!==1?'s':''}</span>
+      </div>
+      ${corpo}
     </div>`;
   }).join('');
-}
 
-function expandirChecklist(id) {
-  const el = document.getElementById('cl-'+id);
-  if (el) el.classList.toggle('hidden');
+  document.getElementById('page-content').innerHTML = `
+    <div class="card" style="margin-bottom:14px;padding:13px 16px">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;color:var(--gray-400)"><span style="cursor:pointer" onclick="voltarChecklists()">Templates</span> › ${tpl.nome}</div>
+          <div style="font-size:16px;font-weight:700;color:var(--gray-800);margin-top:2px">${tpl.nome}</div>
+          <div style="font-size:12px;color:var(--gray-500);margin-top:2px">${tpl.descricao||''}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" onclick="expandirTudoChecklist('${tpl.id}',true)">Expandir tudo</button>
+          <button class="btn btn-ghost btn-sm" onclick="expandirTudoChecklist('${tpl.id}',false)">Recolher tudo</button>
+        </div>
+      </div>
+    </div>
+    ${blocos || `<div class="card"><div class="empty"><i class="ti ti-checklist"></i><p>Este template ainda não tem tarefas</p></div></div>`}`;
 }
 
 function modalNovoChecklist() {
@@ -8041,21 +8320,18 @@ function normalizePersonName(value) {
 
 // Junta os vínculos consultor+analista de UM projeto (mesma pessoa nos 2 campos = 1 vínculo)
 function mergeProjectPersonLinks(project) {
-  const links = [];
-  const consultor = (project.consultor || '').trim();
-  const analista = (project.analista || '').trim();
-  const kC = normalizePersonName(consultor);
-  const kA = normalizePersonName(analista);
+  // Cada papel pode ter várias pessoas; quem acumula os dois vira 'consultor-analista'
+  const porPessoa = new Map();
   const add = (nome, papel) => {
-    links.push({ personKey: normalizePersonName(nome), personNameRaw: nome, roleInProject: papel });
+    const k = normalizePersonName(nome);
+    if (!k) return;
+    const atual = porPessoa.get(k);
+    if (!atual) { porPessoa.set(k, { personKey:k, personNameRaw:nome, roleInProject:papel }); return; }
+    if (atual.roleInProject !== papel) atual.roleInProject = 'consultor-analista';
   };
-  if (consultor && analista && kC === kA) {
-    add(consultor, 'consultor-analista');
-  } else {
-    if (consultor) add(consultor, 'consultor');
-    if (analista) add(analista, 'analista');
-  }
-  return links;
+  listaPessoas(project.consultor).forEach(n => add(n, 'consultor'));
+  listaPessoas(project.analista).forEach(n => add(n, 'analista'));
+  return [...porPessoa.values()];
 }
 
 // Consolida todos os vínculos de todos os projetos (calculado em memória)
@@ -8493,7 +8769,7 @@ function renderAllocationProjectsView() {
     const dl = p.goLive ? daysLeft(p.goLive) : null;
     const mesmaPessoa = p.consultor && p.analista && normalizePersonName(p.consultor)===normalizePersonName(p.analista);
     const profissionais = mesmaPessoa
-      ? `<div style="font-size:12px"><span style="color:var(--gray-400)">Consultor e Analista:</span> ${p.consultor}</div>`
+      ? `<div style="font-size:12px"><span style="color:var(--gray-400)">Consultor e Analista:</span> ${exibirPessoas(p.consultor)}</div>`
       : `<div style="font-size:12px"><span style="color:var(--gray-400)">Consultor:</span> ${p.consultor||'—'}</div><div style="font-size:12px"><span style="color:var(--gray-400)">Analista:</span> ${p.analista||'—'}</div>`;
     const semInicio = !p.dataInicio, semGoLive = !p.goLive;
     return `<tr>
