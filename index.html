@@ -749,7 +749,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-10-18-checklist-mergulho';
+const DOS_BUILD = '2026-10-18-riscos-botoes';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -2787,18 +2787,22 @@ function renderProjectRisks(project) {
       <td style="text-align:center">${r.goLiveBlocker?`<i class="ti ti-ban" style="color:${impeditivoAtivo?'var(--danger)':'var(--gray-300)'};font-size:15px" title="${impeditivoAtivo?'Impeditivo ativo':'Marcado como impeditivo (risco não ativo)'}"></i>`:'<span style="color:var(--gray-300)">—</span>'}</td>
       <td style="white-space:nowrap">
         ${gestor ? `
-          <button class="btn btn-ghost btn-sm" style="padding:3px 5px" title="Editar" onclick="editarRisco('${project.id}','${r.id}')"><i class="ti ti-edit"></i></button>
-          ${ativo?`<button class="btn btn-ghost btn-sm" style="padding:3px 5px;color:var(--success)" title="Marcar como mitigado" onclick="updateRiskStatus('${project.id}','${r.id}','mitigado')"><i class="ti ti-shield-check"></i></button>`:''}
-          ${r.status!=='encerrado'?`<button class="btn btn-ghost btn-sm" style="padding:3px 5px" title="Encerrar" onclick="updateRiskStatus('${project.id}','${r.id}','encerrado')"><i class="ti ti-circle-check"></i></button>`:`<button class="btn btn-ghost btn-sm" style="padding:3px 5px" title="Reabrir" onclick="updateRiskStatus('${project.id}','${r.id}','aberto')"><i class="ti ti-rotate"></i></button>`}
-          <button class="btn btn-ghost btn-sm" style="padding:3px 5px;color:var(--danger)" title="Excluir" onclick="deleteRisk('${project.id}','${r.id}')"><i class="ti ti-trash"></i></button>
-        ` : `<button class="btn btn-ghost btn-sm" style="padding:3px 5px" title="Detalhes" onclick="editarRisco('${project.id}','${r.id}')"><i class="ti ti-eye"></i></button>`}
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" title="Editar risco" onclick="editarRisco('${project.id}','${r.id}')"><i class="ti ti-edit"></i> Editar</button>
+          ${ativo?`<button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px;color:var(--success);border-color:#86efac" title="Marcar como mitigado" onclick="updateRiskStatus('${project.id}','${r.id}','mitigado')"><i class="ti ti-shield-check"></i> Mitigar</button>`:''}
+          ${r.status!=='encerrado'
+            ? `<button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" title="Encerrar risco" onclick="updateRiskStatus('${project.id}','${r.id}','encerrado')"><i class="ti ti-circle-check"></i> Encerrar</button>`
+            : `<button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" title="Reabrir risco" onclick="updateRiskStatus('${project.id}','${r.id}','aberto')"><i class="ti ti-rotate"></i> Reabrir</button>`}
+          <button class="btn btn-sm btn-excluir" style="font-size:11px" title="Excluir risco" onclick="deleteRisk('${project.id}','${r.id}')"><i class="ti ti-trash"></i> Excluir</button>
+        </div>
+        ` : `<button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" title="Ver detalhes" onclick="editarRisco('${project.id}','${r.id}')"><i class="ti ti-eye"></i> Detalhes</button>`}
       </td>
     </tr>`;
   }).join('');
 
   container.innerHTML = indicadores + acoes + `<div class="card" style="padding:0;overflow:hidden">
     <div style="overflow-x:auto"><table style="width:100%;min-width:820px">
-      <thead><tr><th>Risco</th><th>Categoria</th><th>Probab.</th><th>Impacto</th><th>Situação</th><th>Responsável</th><th>Prazo</th><th style="text-align:center">Impeditivo</th><th>Ações</th></tr></thead>
+      <thead><tr><th>Risco</th><th>Categoria</th><th>Probab.</th><th>Impacto</th><th>Situação</th><th>Responsável</th><th>Prazo</th><th style="text-align:center;width:88px">Impeditivo</th><th style="width:270px">Ações</th></tr></thead>
       <tbody>${linhas}</tbody>
     </table></div>
   </div>`;
