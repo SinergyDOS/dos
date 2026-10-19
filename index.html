@@ -749,7 +749,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-10-18-riscos-botoes';
+const DOS_BUILD = '2026-10-19-progresso-macro';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -4631,6 +4631,14 @@ function renderCronogramaMacro(p) {
       .forEach(m => macrosOrdenadas.push(m));
   });
 
+  // Progresso e situação vêm das microtarefas (mesma fonte do Gantt).
+  // O campo m.progress é o valor congelado da importação e não acompanha as baixas.
+  const statusPorMacro = {};
+  try {
+    groupProjectTasksHierarchy(p, p.tasks || []).forEach(g =>
+      g.macroDeliveries.forEach(dd => { if (dd.macroActivity) statusPorMacro[dd.macroActivity.id] = dd; }));
+  } catch (e) { console.warn('progresso macro:', e); }
+
   const linhas = macrosOrdenadas.map(m => {
     if (m._cabecalhoFase) {
       const fc = FASE_COLORS[m._cabecalhoFase] || {bg:'var(--gray-100)',color:'var(--gray-600)'};
@@ -4640,7 +4648,13 @@ function renderCronogramaMacro(p) {
     const vincBadge = nVinc > 0
       ? `<span class="badge badge-green" style="font-size:10px"><i class="ti ti-link"></i>${nVinc} tarefa${nVinc>1?'s':''}</span>`
       : `<span class="badge badge-gray" style="font-size:10px"><i class="ti ti-unlink"></i>Sem vínculo</span>`;
-    const prog = typeof m.progress === 'number' ? m.progress : 0;
+    const dd = statusPorMacro[m.id];
+    const prog = dd && dd.progress && dd.progress.microProgress != null
+      ? dd.progress.microProgress
+      : (typeof m.progress === 'number' ? m.progress : 0);
+    const concl = dd ? dd.progress.completedTasks : null;
+    const totalT = dd ? dd.progress.totalTasks : null;
+    const atrasada = dd && dd.status.key === 'atrasada';
     const naoEncontrada = m.importStatus === 'not-found';
     return `<tr data-macro-row="${m.id}" style="${naoEncontrada?'background:#fef2f2':''}">
       <td style="font-weight:500;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(m.name||'').replace(/"/g,'&quot;')}">${m.name || '—'}
@@ -4654,8 +4668,8 @@ function renderCronogramaMacro(p) {
         : (m.endDate?fmt(m.endDate):'—')}</td>
       <td>
         <div style="display:flex;align-items:center;gap:6px">
-          <div class="progress" style="flex:1"><div class="progress-bar${prog===100?' green':''}" style="width:${prog}%"></div></div>
-          <span style="font-size:11px;font-weight:600;color:var(--gray-600)">${prog}%</span>
+          <div class="progress" style="flex:1"><div class="progress-bar${prog===100?' green':''}" style="width:${prog}%${atrasada&&prog<100?';background:var(--danger)':''}"></div></div>
+          <span style="font-size:11px;font-weight:600;color:${atrasada&&prog<100?'var(--danger)':'var(--gray-600)'}" ${totalT!=null?`title="${concl} de ${totalT} tarefa(s) concluída(s)"`:''}>${prog}%</span>
         </div>
       </td>
       <td style="font-size:12px;color:var(--gray-600);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(m.responsible||'').replace(/"/g,'&quot;')}">${m.responsible || '—'}</td>
