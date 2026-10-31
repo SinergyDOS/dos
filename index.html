@@ -986,6 +986,7 @@ function loadState() {
     consultor: p.consultor || '',
     analista: p.analista || '',
     techLead: typeof p.techLead === 'string' ? p.techLead : '',
+    analistaProjetos: typeof p.analistaProjetos === 'string' ? p.analistaProjetos : '',
     // Tarefas micro: garante macroActivityId=null em tarefas antigas, sem sobrescrever demais campos
     tasks: (Array.isArray(p.tasks) ? p.tasks : []).map(t => ({
       ...t,
@@ -1201,6 +1202,7 @@ function _mapProjectRow(p, tasksByProject, risksByProject) {
     consultor: p.consultor || '',
     analista: p.analista || '',
     techLead: p.tech_lead || '',
+    analistaProjetos: p.analista_projetos || '',
     tasks: tasks,
     templateId: p.template_id || null,
     macroActivities: Array.isArray(p.macro_activities) ? p.macro_activities : [],
@@ -1358,6 +1360,7 @@ function _projetoParaRow(p) {
     consultor: p.consultor || '',
     analista: p.analista || '',
     tech_lead: p.techLead || '',
+    analista_projetos: p.analistaProjetos || '',
     template_id: p.templateId || null,
     macro_activities: Array.isArray(p.macroActivities) ? p.macroActivities : [],
     macro_mappings: Array.isArray(p.macroMappings) ? p.macroMappings : [],
@@ -2667,7 +2670,7 @@ function showProjectExecutiveSummary(projectId) {
     <table style="width:100%;margin-bottom:14px"><tbody style="font-size:13px">
       <tr><td style="color:var(--gray-500);padding:5px 0">Início</td><td style="text-align:right">${fmt(p.dataInicio)}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Go-live</td><td style="text-align:right">${fmt(p.goLive)}</td></tr>
       <tr><td style="color:var(--gray-500);padding:5px 0">Consultor</td><td style="text-align:right">${exibirPessoas(p.consultor)}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Analista</td><td style="text-align:right">${exibirPessoas(p.analista)}</td></tr>
-      <tr><td style="color:var(--gray-500);padding:5px 0">Tech lead</td><td style="text-align:right" colspan="3">${exibirPessoas(p.techLead)}</td></tr>
+      <tr><td style="color:var(--gray-500);padding:5px 0">Tech lead</td><td style="text-align:right">${exibirPessoas(p.techLead)}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Analista de projetos</td><td style="text-align:right">${exibirPessoas(p.analistaProjetos)}</td></tr>
       <tr><td style="color:var(--gray-500);padding:5px 0">Tarefas bloqueadas</td><td style="text-align:right;color:${prog.blockedTasks?'var(--danger)':'inherit'}">${prog.blockedTasks}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Tarefas atrasadas</td><td style="text-align:right;color:${prog.overdueTasks?'var(--danger)':'inherit'}">${prog.overdueTasks}</td></tr>
       <tr><td style="color:var(--gray-500);padding:5px 0">Riscos abertos</td><td style="text-align:right">${rs.open+rs.monitoring}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Impeditivos ativos</td><td style="text-align:right;color:${rs.activeBlockers?'var(--danger)':'inherit'}">${rs.activeBlockers}</td></tr>
       <tr><td style="color:var(--gray-500);padding:5px 0">Macro entregas atrasadas</td><td style="text-align:right">${macroAtrasadas}</td><td style="color:var(--gray-500);padding:5px 0 5px 20px">Riscos vencidos</td><td style="text-align:right">${rs.overdue}</td></tr>
@@ -3427,6 +3430,11 @@ function renderProjectForm(editId = null) {
       <label class="form-label"><i class="ti ti-user-star" style="font-size:13px;color:var(--gray-500);margin-right:4px"></i>Tech lead do projeto</label>
       ${renderPessoasCheckboxes('pTechLead', gestores, p ? (p.techLead||'') : '')}
     </div>
+    <div class="form-group">
+      <label class="form-label"><i class="ti ti-clipboard-list" style="font-size:13px;color:var(--gray-500);margin-right:4px"></i>Analista de projetos</label>
+      ${renderPessoasCheckboxes('pAnalistaProjetos', gestores, p ? (p.analistaProjetos||'') : '')}
+      <div style="font-size:11px;color:var(--gray-400);margin-top:4px">Define a carteira do analista de projetos nos boletins diários. Não altera quem enxerga o projeto.</div>
+    </div>
     <div class="form-grid">
       <div class="form-group"><label class="form-label">Consultor responsável</label>
         ${renderPessoasCheckboxes('pConsultor', consultores, consultorSalvo)}
@@ -3539,6 +3547,7 @@ async function salvarProjeto(editId) {
     const consultor = lerPessoasCheckboxes('pConsultor');
     const analista = lerPessoasCheckboxes('pAnalista');
     const techLead = lerPessoasCheckboxes('pTechLead');
+    const analistaProjetos = lerPessoasCheckboxes('pAnalistaProjetos');
 
     if (!Array.isArray(state.projetos)) state.projetos = [];
 
@@ -3555,7 +3564,7 @@ async function salvarProjeto(editId) {
       const p = state.projetos.find(x=>x.id===editId);
       if (!p) { reativarBotao(); alert('Projeto não encontrado.'); return; }
       // Monta a versão atualizada (sem tocar em tasks/cronograma)
-      const atualizado = { ...p, nome, cliente, modulos, itensCustomizados, dataInicio, goLive, consultor, analista };
+      const atualizado = { ...p, nome, cliente, modulos, itensCustomizados, dataInicio, goLive, consultor, analista, techLead, analistaProjetos };
       // Grava no banco PRIMEIRO; só reflete na tela se confirmar.
       const res = await atualizarProjetoSupabase(atualizado);
       if (!res.ok) {
@@ -3565,7 +3574,7 @@ async function salvarProjeto(editId) {
         else alert('Não foi possível salvar: ' + res.error);
         return;
       }
-      Object.assign(p, { nome, cliente, modulos, itensCustomizados, dataInicio, goLive, consultor, analista, techLead, atualizadoEm: new Date().toISOString() });
+      Object.assign(p, { nome, cliente, modulos, itensCustomizados, dataInicio, goLive, consultor, analista, techLead, analistaProjetos, atualizadoEm: new Date().toISOString() });
       contexto = (state.currentProjetoId === editId && state.currentPage === 'projeto-detalhe') ? 'detalhe' : 'lista';
     } else {
       const tplId = el('pTemplate')?.value || '';
@@ -3575,7 +3584,7 @@ async function salvarProjeto(editId) {
         : [];
       const novo = {
         id:uid(), nome, cliente, modulos, itensCustomizados, dataInicio, goLive,
-        consultor, analista, techLead, tasks, templateId: tplId || null,
+        consultor, analista, techLead, analistaProjetos, tasks, templateId: tplId || null,
         macroActivities: [], macroMappings: [], risks: [], criadoEm: new Date().toISOString()
       };
       // O cronograma macro nasce do próprio checklist — sem depender de importação.
@@ -3682,6 +3691,7 @@ function renderProjetoDetail(p) {
     <span><i class="ti ti-user" style="margin-right:4px"></i>Consultor: <strong>${exibirPessoas(p.consultor)}</strong></span>
     <span><i class="ti ti-user" style="margin-right:4px"></i>Analista: <strong>${exibirPessoas(p.analista)}</strong></span>
     ${listaPessoas(p.techLead).length?`<span><i class="ti ti-user-star" style="margin-right:4px"></i>Tech lead: <strong>${exibirPessoas(p.techLead)}</strong></span>`:''}
+    ${listaPessoas(p.analistaProjetos).length?`<span><i class="ti ti-clipboard-list" style="margin-right:4px"></i>Analista de projetos: <strong>${exibirPessoas(p.analistaProjetos)}</strong></span>`:''}
   </div>
 </div>
 
