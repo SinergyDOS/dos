@@ -749,7 +749,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-10-19-progresso-macro';
+const DOS_BUILD = '2026-10-31-missao-da-semana';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -987,6 +987,7 @@ function loadState() {
     analista: p.analista || '',
     techLead: typeof p.techLead === 'string' ? p.techLead : '',
     analistaProjetos: typeof p.analistaProjetos === 'string' ? p.analistaProjetos : '',
+    missoes: Array.isArray(p.missoes) ? p.missoes : [],
     // Tarefas micro: garante macroActivityId=null em tarefas antigas, sem sobrescrever demais campos
     tasks: (Array.isArray(p.tasks) ? p.tasks : []).map(t => ({
       ...t,
@@ -1299,11 +1300,12 @@ async function carregarProjetosDoSupabase() {
     await carregarUsuariosDoSupabase();
     // O RLS já limita o que cada usuário enxerga; não precisamos filtrar aqui.
     // Busca paginada: sem isso, consultas acima de 1000 linhas vinham cortadas.
-    const [projRes, taskRes, riskRes, fuRes] = await Promise.all([
+    const [projRes, taskRes, riskRes, fuRes, wmRes] = await Promise.all([
       _fetchAllRows('projects'),
       _fetchAllRows('tasks'),
       _fetchAllRows('risks'),
-      _fetchAllRows('follow_ups')
+      _fetchAllRows('follow_ups'),
+      _fetchAllRows('weekly_missions')
     ]);
     if (projRes.error || taskRes.error || riskRes.error) {
       console.error('Erro ao carregar do Supabase:', projRes.error || taskRes.error || riskRes.error);
@@ -1329,9 +1331,19 @@ async function carregarProjetosDoSupabase() {
     } else if (fuRes && fuRes.error) {
       console.warn('Follow ups não carregados (a tabela follow_ups já foi criada?):', fuRes.error.message);
     }
+    // Missões da semana: a tabela pode não existir ainda — não quebra a carga.
+    const wmByProject = {};
+    if (wmRes && !wmRes.error) {
+      (wmRes.data || []).forEach(r => {
+        (wmByProject[r.project_id] = wmByProject[r.project_id] || []).push(_mapMissaoRow(r));
+      });
+    } else if (wmRes && wmRes.error) {
+      console.warn('Missões não carregadas (a tabela weekly_missions já foi criada?):', wmRes.error.message);
+    }
     state.projetos = (projRes.data || []).map(p => {
       const proj = _mapProjectRow(p, tasksByProject, risksByProject);
       proj.followUps = fuByProject[p.id] || [];
+      proj.missoes = wmByProject[p.id] || [];
       return proj;
     });
     // Normaliza módulos (mesma regra do loadState local), idempotente
@@ -4483,6 +4495,395 @@ async function confirmarExcluirProjeto(pId) {
   notificar(`Projeto "${p.nome}" excluído.`, 'sucesso');
 }
 
+
+// ==================== MISSÃO DA SEMANA ====================
+// Um texto por projeto por semana, escrito na reunião de sexta.
+// O texto é guardado como veio; os itens são derivados dele.
+
+function _mapMissaoRow(r) {
+  return {
+    id: r.id, projectId: r.project_id,
+    semanaRef: r.semana_ref || null,
+    texto: r.texto || '',
+    itens: Array.isArray(r.itens) ? r.itens : [],
+    createdBy: r.created_by || '', createdAt: r.created_at || null,
+    updatedAt: r.updated_at || null, atualizadoPor: r.atualizado_por || ''
+  };
+}
+
+// Sexta da semana corrente (hoje, se hoje for sexta; senão a última que passou)
+function _ultimaSexta(base) {
+  const d = base ? new Date(base + 'T00:00:00') : new Date();
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() - ((d.getDay() - 5 + 7) % 7));
+  return d.toISOString().slice(0,10);
+}
+function _somaDias(iso, n) {
+  const d = new Date(iso + 'T00:00:00'); d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0,10);
+}
+function _proximoDiaUtil() {
+  const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  return d;
+}
+
+const _DIAS_SEMANA = { dom:0, seg:1, ter:2, qua:3, qui:4, sex:5, sab:6 };
+
+// Lê o prazo escrito no próprio item. Sem prazo, vale a sexta seguinte.
+// Formatos aceitos: "até 05/11", "até dia 5", "até sex".
+function _lerPrazoDoItem(texto, semanaRef) {
+  const limite = _somaDias(semanaRef, 7);          // sexta seguinte
+  const semAcento = texto.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+
+  // até 05/11 (ou 05/11/2026)
+  let m = semAcento.match(/\bate\s+(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
+  if (m) {
+    const dia = +m[1], mes = +m[2];
+    let ano = m[3] ? (+m[3] < 100 ? 2000 + (+m[3]) : +m[3]) : new Date(semanaRef + 'T00:00:00').getFullYear();
+    // se a data cair bem antes da semana, assume o ano seguinte
+    let iso = `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+    if (iso < semanaRef && !m[3]) iso = `${ano+1}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+    return { prazo: iso, trecho: m[0] };
+  }
+  // até dia 5
+  m = semAcento.match(/\bate\s+(?:o\s+)?dia\s+(\d{1,2})\b/);
+  if (m) {
+    const dia = +m[1];
+    const base = new Date(semanaRef + 'T00:00:00');
+    let cand = new Date(base.getFullYear(), base.getMonth(), dia);
+    if (cand < base) cand = new Date(base.getFullYear(), base.getMonth() + 1, dia);
+    return { prazo: cand.toISOString().slice(0,10), trecho: m[0] };
+  }
+  // até seg / ter / qua / qui / sex — dentro da semana da missão
+  m = semAcento.match(/\bate\s+(dom|seg|ter|qua|qui|sex|sab)[a-z]*\b/);
+  if (m) {
+    const alvo = _DIAS_SEMANA[m[1]];
+    const base = new Date(semanaRef + 'T00:00:00');   // sexta
+    let delta = (alvo - base.getDay() + 7) % 7;
+    if (delta === 0) delta = 7;                        // "até sex" = a sexta seguinte
+    return { prazo: _somaDias(semanaRef, delta), trecho: m[0] };
+  }
+  return { prazo: limite, trecho: null };
+}
+
+// Converte o texto colado em itens. Ignora linhas vazias e tira marcadores.
+function interpretarTextoMissao(texto, semanaRef, itensAnteriores) {
+  const antigos = Array.isArray(itensAnteriores) ? itensAnteriores : [];
+  const chave = t => _normTxt(String(t || ''));
+  return String(texto || '').split('\n')
+    .map(l => l.replace(/^\s*(?:[-*•–—]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean)
+    .map(linha => {
+      const { prazo } = _lerPrazoDoItem(linha, semanaRef);
+      // mantém o estado de "feito" quando o texto do item não mudou
+      const anterior = antigos.find(a => chave(a.texto) === chave(linha));
+      return {
+        id: anterior ? anterior.id : uid(),
+        texto: linha,
+        prazo,
+        feito: anterior ? !!anterior.feito : false,
+        feito_em: anterior ? (anterior.feito_em || null) : null,
+        feito_por: anterior ? (anterior.feito_por || null) : null
+      };
+    });
+}
+
+// ── acesso aos dados ──
+function _missoesDoProjeto(p) { return Array.isArray(p?.missoes) ? p.missoes : []; }
+function missaoDaSemana(p, semanaRef) {
+  const s = semanaRef || _ultimaSexta();
+  return _missoesDoProjeto(p).find(m => m.semanaRef === s) || null;
+}
+function missoesAnteriores(p) {
+  const s = _ultimaSexta();
+  return _missoesDoProjeto(p).filter(m => m.semanaRef !== s)
+    .sort((a,b) => String(b.semanaRef||'').localeCompare(String(a.semanaRef||'')));
+}
+function itensAbertos(m) { return (m?.itens || []).filter(i => !i.feito); }
+
+// Urgência de um item em aberto
+function _itemUrgencia(it) {
+  if (it.feito || !it.prazo) return null;
+  const dl = daysLeft(it.prazo);
+  if (dl < 0) return { nivel:'vencido', cor:'var(--danger)', bg:'#fef2f2', texto:`${Math.abs(dl)}d de atraso` };
+  if (dl === 0) return { nivel:'hoje', cor:'var(--warn)', bg:'#fffbeb', texto:'vence hoje' };
+  const p = parseLocalDate(it.prazo);
+  if (p && p.getTime() <= _proximoDiaUtil().getTime()) return { nivel:'proximo', cor:'var(--warn)', bg:'#fffbeb', texto:'vence amanhã' };
+  return { nivel:'ok', cor:'var(--gray-500)', bg:'', texto:`vence em ${dl}d` };
+}
+
+
+// ── Bloco no topo da aba Follow up ──
+function renderMissoesSemana(p) {
+  const sexta = _ultimaSexta();
+  const m = missaoDaSemana(p, sexta);
+  const antigas = missoesAnteriores(p);
+  const feitos = m ? (m.itens || []).filter(i => i.feito).length : 0;
+  const total = m ? (m.itens || []).length : 0;
+
+  const cabecalho = `<div style="display:flex;align-items:center;gap:9px;padding:12px 15px;background:#f5f9ff;border-bottom:1px solid var(--gray-100);flex-wrap:wrap">
+      <i class="ti ti-target" style="color:#2563eb;font-size:17px"></i>
+      <span style="font-size:14px;font-weight:700;color:var(--gray-800)">Missão da semana</span>
+      <span style="font-size:11.5px;color:var(--gray-500)">semana de ${fmt(sexta)}</span>
+      ${total ? `<span class="badge" style="background:${feitos===total?'#dcfce7':'#dbeafe'};color:${feitos===total?'#166534':'#1e40af'};font-size:10px">${feitos} de ${total} feitos</span>` : ''}
+      ${isGestor() ? `<button class="btn ${m?'btn-secondary':'btn-primary'} btn-sm" style="margin-left:auto" onclick="modalEscreverMissao('${p.id}')">
+          <i class="ti ti-${m?'edit':'pencil-plus'}"></i> ${m?'Editar missão':'Escrever missão'}</button>` : ''}
+    </div>`;
+
+  const corpo = m
+    ? `<div style="padding:11px 15px">
+        ${(m.itens||[]).map(it => _itemMissaoLinha(p, m, it)).join('') || '<div style="font-size:12.5px;color:var(--gray-400)">A missão desta semana está sem itens.</div>'}
+        <div style="font-size:11px;color:var(--gray-400);margin-top:9px">
+          Escrita por ${m.createdBy || '—'}${m.atualizadoPor && m.atualizadoPor !== m.createdBy ? ` · editada por ${m.atualizadoPor}` : ''}
+        </div>
+      </div>`
+    : `<div style="padding:14px 15px;font-size:12.5px;color:var(--gray-400)">
+        Nenhuma missão escrita para esta semana.${isGestor() ? ' Use "Escrever missão" para registrar o que foi combinado na reunião.' : ''}
+      </div>`;
+
+  const historico = antigas.length ? `<div style="border-top:1px solid var(--gray-100)">
+      <div onclick="toggleMissoesAnteriores('${p.id}')" style="padding:9px 15px;cursor:pointer;display:flex;align-items:center;gap:7px;background:var(--gray-50)">
+        <i class="ti ti-chevron-${state.missoesHistAberto === p.id ? 'down':'right'}" style="font-size:13px;color:var(--gray-400)"></i>
+        <span style="font-size:12px;font-weight:600;color:var(--gray-600)">Ver semanas anteriores</span>
+        <span style="font-size:11px;color:var(--gray-400)">${antigas.length} semana${antigas.length!==1?'s':''}</span>
+      </div>
+      ${state.missoesHistAberto === p.id ? antigas.map(ma => {
+        const f = (ma.itens||[]).filter(i=>i.feito).length, t = (ma.itens||[]).length;
+        return `<div style="padding:10px 15px 10px 32px;border-top:1px solid var(--gray-100)">
+          <div style="font-size:12px;font-weight:600;color:var(--gray-700);margin-bottom:6px">
+            Semana de ${fmt(ma.semanaRef)} <span style="font-weight:400;color:var(--gray-400)">— ${f} de ${t} feitos</span>
+          </div>
+          ${(ma.itens||[]).map(it => `<div style="font-size:12px;color:${it.feito?'var(--gray-400)':'var(--gray-700)'};padding:2px 0;${it.feito?'text-decoration:line-through':''}">
+              <i class="ti ti-${it.feito?'circle-check':'circle'}" style="font-size:12px;color:${it.feito?'var(--success)':'var(--gray-300)'};vertical-align:-2px"></i> ${it.texto}
+            </div>`).join('')}
+        </div>`;
+      }).join('') : ''}
+    </div>` : '';
+
+  return `<div class="card" style="margin-bottom:16px;padding:0;overflow:hidden">${cabecalho}${corpo}${historico}</div>`;
+}
+
+function toggleMissoesAnteriores(pId) {
+  state.missoesHistAberto = state.missoesHistAberto === pId ? null : pId;
+  const p = state.projetos.find(x => x.id === pId);
+  if (p) renderProjetoDetail(p);
+}
+
+// Linha de um item, com caixa de marcar e rótulo de texto
+function _itemMissaoLinha(p, m, it, opts = {}) {
+  const u = _itemUrgencia(it);
+  const quando = it.feito_em ? new Date(it.feito_em) : null;
+  const marca = it.feito
+    ? `<span style="font-size:11px;color:var(--success)"><i class="ti ti-check" style="font-size:11px"></i> ${it.feito_por || '—'}${quando && !isNaN(quando) ? ' · ' + quando.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}) : ''}</span>`
+    : (u ? `<span style="font-size:11px;color:${u.cor};font-weight:${u.nivel==='ok'?'400':'600'}">${fmt(it.prazo)} · ${u.texto}</span>` : '');
+  return `<div style="display:flex;gap:9px;align-items:flex-start;padding:8px 10px;border-left:3px solid ${it.feito?'var(--success)':(u?u.cor:'var(--gray-200)')};background:${it.feito?'var(--gray-50)':(u&&u.bg?u.bg:'#fff')};border-radius:0 7px 7px 0;margin-bottom:6px">
+    <input type="checkbox" ${it.feito?'checked':''} style="margin-top:3px;flex-shrink:0" onclick="marcarItemMissao('${p.id}','${m.id}','${it.id}',this.checked)">
+    <div style="flex:1;min-width:0">
+      <div style="font-size:13px;color:${it.feito?'var(--gray-400)':'var(--gray-800)'};${it.feito?'text-decoration:line-through':''};line-height:1.4">${it.texto}</div>
+      <div style="margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        ${opts.mostrarProjeto ? `<span style="font-size:11px;color:var(--accent);font-weight:600">${p.nome}</span>` : ''}
+        ${marca}
+      </div>
+    </div>
+    <button class="btn btn-secondary btn-sm" style="padding:3px 9px;font-size:11px;flex-shrink:0" onclick="marcarItemMissao('${p.id}','${m.id}','${it.id}',${it.feito?'false':'true'})">
+      <i class="ti ti-${it.feito?'arrow-back-up':'check'}"></i> ${it.feito?'Desfazer':'Feito'}</button>
+  </div>`;
+}
+
+async function marcarItemMissao(pId, mId, itemId, feito) {
+  const p = state.projetos.find(x => x.id === pId);
+  const m = _missoesDoProjeto(p).find(x => x.id === mId);
+  const it = m && (m.itens||[]).find(x => x.id === itemId);
+  if (!p || !m || !it) return;
+  const antes = { feito: it.feito, feito_em: it.feito_em, feito_por: it.feito_por };
+  it.feito = !!feito;
+  it.feito_em = feito ? new Date().toISOString() : null;
+  it.feito_por = feito ? (state.currentUser?.name || '') : null;
+  _reRenderMissoes(p);
+  if (sbClient) {
+    // Função no banco: altera só este item, para duas pessoas marcando ao
+    // mesmo tempo não sobrescreverem uma à outra.
+    const { error } = await sbClient.rpc('marcar_item_missao', { p_mission_id: mId, p_item_id: itemId, p_feito: !!feito });
+    if (error) {
+      Object.assign(it, antes);
+      _reRenderMissoes(p);
+      notificar('Não foi possível registrar: ' + error.message, 'erro');
+      return;
+    }
+  }
+  saveState();
+}
+
+// Redesenha a tela certa. Detecta pela própria tela, porque state.currentPage
+// não é atualizado ao abrir um projeto.
+function _reRenderMissoes(p) {
+  const naTelaDoProjeto = !!document.getElementById('task-view') && p && state.currentProjetoId === p.id;
+  if (naTelaDoProjeto) { renderProjetoDetail(p); return; }
+  if (state.currentPage === 'meu-dia') { renderMeuDia(); return; }
+  if (p) renderProjetoDetail(p);
+}
+
+
+// ── Escrever / editar a missão da semana ──
+function modalEscreverMissao(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode escrever a missão.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  const sexta = _ultimaSexta();
+  const m = missaoDaSemana(p, sexta);
+  // itens que ficaram abertos na semana passada, para "trazer"
+  const anterior = _missoesDoProjeto(p).find(x => x.semanaRef === _somaDias(sexta, -7));
+  const pendentes = anterior ? itensAbertos(anterior) : [];
+  const textoInicial = m ? m.texto : '';
+
+  openModal(`<div class="modal-header">
+    <div class="modal-title"><i class="ti ti-target" style="margin-right:8px;color:#2563eb"></i>${m?'Editar missão':'Escrever missão'} — ${p.nome}</div>
+    <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="modal-body">
+    <div style="font-size:12px;color:var(--gray-500);margin-bottom:12px">
+      Semana de <strong>${fmt(sexta)}</strong>. Escreva um item por linha.
+      Para dar prazo, escreva no próprio item: <em>até 05/11</em>, <em>até dia 5</em> ou <em>até ter</em>.
+      Sem prazo, vale a sexta seguinte (${fmt(_somaDias(sexta,7))}).
+    </div>
+    ${pendentes.length ? `<div style="background:#fffbeb;border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:12px;color:#92400e;flex:1">${pendentes.length} item(ns) ficaram abertos na semana anterior.</span>
+      <button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="trazerItensAnteriores('${pId}')"><i class="ti ti-arrow-down"></i> Trazer itens abertos</button>
+    </div>` : ''}
+    <div id="emAlert" class="form-alert" style="display:none"><i class="ti ti-alert-circle" style="font-size:15px"></i><span id="emAlertMsg"></span></div>
+    <div class="form-group">
+      <label class="form-label">Missão da semana <span class="req-star">*</span></label>
+      <textarea class="form-input form-textarea" id="emTexto" rows="7" placeholder="Fechar o DE-PARA de verbas até 05/11&#10;Validar a coleta do relógio até ter&#10;Enviar o layout de afastamentos" oninput="previewMissao('${pId}')">${textoInicial.replace(/</g,'&lt;')}</textarea>
+    </div>
+    <div id="emPreview"></div>
+    ${m ? `<div style="font-size:11.5px;color:var(--gray-400);margin-top:10px">
+      Itens já marcados como feitos continuam marcados, desde que o texto não mude.</div>` : ''}
+  </div>
+  <div class="modal-footer">
+    ${m && isGestor() ? `<button class="btn btn-sm btn-excluir" style="margin-right:auto" onclick="excluirMissaoSemana('${pId}')"><i class="ti ti-trash"></i> Excluir missão</button>` : ''}
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" id="emBtn" onclick="salvarMissaoSemana('${pId}')"><i class="ti ti-check"></i> ${m?'Salvar alterações':'Registrar missão'}</button>
+  </div>`);
+  previewMissao(pId);
+}
+
+function trazerItensAnteriores(pId) {
+  const p = state.projetos.find(x => x.id === pId);
+  const sexta = _ultimaSexta();
+  const anterior = _missoesDoProjeto(p).find(x => x.semanaRef === _somaDias(sexta, -7));
+  const pendentes = anterior ? itensAbertos(anterior) : [];
+  const ta = document.getElementById('emTexto');
+  if (!ta || !pendentes.length) return;
+  const atual = ta.value.trim();
+  const novos = pendentes.map(i => i.texto).filter(t => !atual.includes(t));
+  ta.value = (atual ? atual + '\n' : '') + novos.join('\n');
+  previewMissao(pId);
+}
+
+// Mostra os itens que serão criados, com o prazo reconhecido em cada um
+function previewMissao(pId) {
+  const p = state.projetos.find(x => x.id === pId);
+  const box = document.getElementById('emPreview');
+  const texto = document.getElementById('emTexto')?.value || '';
+  if (!p || !box) return;
+  const sexta = _ultimaSexta();
+  const m = missaoDaSemana(p, sexta);
+  const itens = interpretarTextoMissao(texto, sexta, m ? m.itens : []);
+  if (!itens.length) { box.innerHTML = `<div style="font-size:12px;color:var(--gray-400)">Nenhum item reconhecido ainda.</div>`; return; }
+  box.innerHTML = `<div style="background:var(--gray-50);border-radius:8px;padding:11px 13px">
+    <div style="font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:7px">
+      <i class="ti ti-list-check" style="font-size:13px;vertical-align:-2px"></i> ${itens.length} item(ns) que serão criados
+    </div>
+    ${itens.map(i => `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:3px 0;border-top:1px solid var(--gray-100)">
+      <span style="color:var(--gray-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.texto}${i.feito?' <span style="color:var(--success);font-size:11px">(já feito)</span>':''}</span>
+      <span style="color:var(--gray-500);white-space:nowrap">${fmt(i.prazo)}</span>
+    </div>`).join('')}
+  </div>`;
+}
+
+async function salvarMissaoSemana(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode escrever a missão.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  const el = id => document.getElementById(id);
+  const erro = msg => { const a=el('emAlert'), b=el('emAlertMsg'); if(a&&b){ b.textContent=msg; a.style.display='flex'; } };
+  if (el('emAlert')) el('emAlert').style.display = 'none';
+
+  const texto = (el('emTexto')?.value || '').trim();
+  if (!texto) { erro('Escreva a missão da semana.'); return; }
+  const sexta = _ultimaSexta();
+  const existente = missaoDaSemana(p, sexta);
+  const itens = interpretarTextoMissao(texto, sexta, existente ? existente.itens : []);
+  if (!itens.length) { erro('Nenhum item foi reconhecido no texto.'); return; }
+
+  const btn = el('emBtn'); const lbl = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Salvando...'; }
+  const quem = state.currentUser?.name || '';
+
+  if (existente) {
+    const antes = { texto: existente.texto, itens: existente.itens };
+    if (sbClient) {
+      const { data, error } = await sbClient.from('weekly_missions')
+        .update({ texto, itens, atualizado_por: quem, updated_at: new Date().toISOString() })
+        .eq('id', existente.id).select('id');
+      if (error) { if(btn){btn.disabled=false;btn.innerHTML=lbl;} erro('Não foi possível salvar: ' + error.message); return; }
+      if (!data || !data.length) { if(btn){btn.disabled=false;btn.innerHTML=lbl;} erro('A missão não foi gravada no servidor (verifique suas permissões).'); return; }
+    }
+    existente.texto = texto; existente.itens = itens; existente.atualizadoPor = quem;
+  } else {
+    const nova = { id: uid(), projectId: pId, semanaRef: sexta, texto, itens,
+                   createdBy: quem, createdAt: new Date().toISOString(), atualizadoPor: '' };
+    if (sbClient) {
+      const { data, error } = await sbClient.from('weekly_missions').insert({
+        id: nova.id, project_id: pId, semana_ref: sexta, texto, itens, created_by: quem
+      }).select('id');
+      if (error) { if(btn){btn.disabled=false;btn.innerHTML=lbl;} erro('Não foi possível salvar: ' + error.message); return; }
+      if (!data || !data.length) { if(btn){btn.disabled=false;btn.innerHTML=lbl;} erro('A missão não foi gravada no servidor (verifique suas permissões).'); return; }
+    }
+    if (!Array.isArray(p.missoes)) p.missoes = [];
+    p.missoes.push(nova);
+  }
+  saveState();
+  closeModal();
+  _reRenderMissoes(p);
+  notificar('Missão da semana registrada.', 'sucesso');
+}
+
+async function excluirMissaoSemana(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode excluir a missão.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  const m = p && missaoDaSemana(p, _ultimaSexta());
+  if (!p || !m) return;
+  if (!confirm(`Excluir a missão da semana de ${fmt(m.semanaRef)}?\n\nOs ${(m.itens||[]).length} item(ns) e as marcações de feito serão perdidos. Esta ação não pode ser desfeita.`)) return;
+  if (sbClient) {
+    const { data, error } = await sbClient.from('weekly_missions').delete().eq('id', m.id).select('id');
+    if (error) { notificar('Não foi possível excluir: ' + error.message, 'erro'); return; }
+    if (!data || !data.length) { notificar('A missão não foi excluída no servidor (verifique suas permissões).', 'erro'); return; }
+  }
+  p.missoes = _missoesDoProjeto(p).filter(x => x.id !== m.id);
+  saveState();
+  closeModal();
+  _reRenderMissoes(p);
+  notificar('Missão excluída.', 'sucesso');
+}
+
+// ── Itens abertos para o Meu dia / Dia da equipe ──
+function missoesParaMeuDia(projetos) {
+  const sexta = _ultimaSexta();
+  const grupos = [];
+  (projetos || []).forEach(p => {
+    const m = missaoDaSemana(p, sexta);
+    const abertos = m ? itensAbertos(m) : [];
+    if (m && abertos.length) {
+      grupos.push({ p, m, itens: abertos.sort((a,b) => String(a.prazo||'').localeCompare(String(b.prazo||''))) });
+    } else if (!m && isGestor()) {
+      grupos.push({ p, m: null, itens: [] });   // "Sem missão", só para o gestor
+    }
+  });
+  return grupos;
+}
+
 // ==================== FOLLOW UP ====================
 // Histórico de alinhamentos do projeto. Cada registro é datado e imutável —
 // serve como memória do que foi combinado com o time, consultável depois.
@@ -4534,7 +4935,7 @@ function renderFollowUp(p) {
       <p>Nenhum registro de follow up</p>
       <small>${podeEscrever ? 'Use o campo acima para registrar o primeiro alinhamento.' : 'O gestor do projeto ainda não registrou alinhamentos.'}</small></div></div>`;
 
-  container.innerHTML = editor + (registros.length ? `<div style="font-size:12px;font-weight:700;color:var(--gray-600);margin-bottom:10px">
+  container.innerHTML = renderMissoesSemana(p) + editor + (registros.length ? `<div style="font-size:12px;font-weight:700;color:var(--gray-600);margin-bottom:10px">
       Histórico <span style="font-weight:400;color:var(--gray-400)">— ${registros.length} registro(s), do mais recente ao mais antigo</span>
     </div>` : '') + historico;
 }
@@ -6963,7 +7364,8 @@ function montarMeuDia() {
   const foco = fazer.filter(i => i.dl === null || i.dl <= HORIZONTE);
   const resto = fazer.filter(i => i.dl !== null && i.dl > HORIZONTE);
   const emAberto = arr => arr.filter(i => i.t.status !== 'concluida').length;
-  return { destravar, despachar, foco, radar: resto, projetosNoRecorte: projetos.length,
+  const missoes = missoesParaMeuDia(projetos);
+  return { destravar, despachar, foco, radar: resto, projetosNoRecorte: projetos.length, missoes,
            totalAberto: emAberto(destravar) + emAberto(despachar) + emAberto(fazer),
            feitasHoje: [...destravar, ...despachar, ...fazer].filter(i => i.t.status === 'concluida').length };
 }
@@ -7044,7 +7446,7 @@ function renderMeuDia() {
   const d = montarMeuDia();
   const page = document.getElementById('page-content');
 
-  if (d.totalAberto === 0 && !d.feitasHoje) {
+  if (d.totalAberto === 0 && !d.feitasHoje && !(d.missoes || []).length) {
     const f = normalizeMeuDiaFiltros();
     const comFiltro = isGestor() && (f.projeto || f.consultor || f.analista);
     page.innerHTML = `<div class="card"><div class="empty"><i class="ti ti-${comFiltro?'filter-off':'checks'}"></i>
@@ -7094,6 +7496,32 @@ function renderMeuDia() {
       </div>
     </div>`;
   }
+  // Missão da semana: itens abertos dos projetos do recorte, agrupados por projeto
+  const grupos = d.missoes || [];
+  const totalItens = grupos.reduce((s,g) => s + g.itens.length, 0);
+  const semMissao = grupos.filter(g => !g.m).length;
+  const blocoMissoes = grupos.length ? `<div class="card" style="margin-bottom:14px;padding:0;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:9px;padding:11px 14px;background:#f5f9ff;border-bottom:1px solid var(--gray-100);flex-wrap:wrap">
+        <i class="ti ti-target" style="color:#2563eb;font-size:16px"></i>
+        <span style="font-size:13.5px;font-weight:700;color:var(--gray-800)">Missão da semana</span>
+        ${totalItens ? `<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:10px">${totalItens} em aberto</span>` : ''}
+        ${semMissao ? `<span class="badge badge-gray" style="font-size:10px">${semMissao} sem missão</span>` : ''}
+        <span style="font-size:11px;color:var(--gray-400)">semana de ${fmt(_ultimaSexta())}</span>
+      </div>
+      <div style="padding:10px 14px">
+        ${grupos.map(g => !g.m
+          ? `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-left:3px solid var(--gray-300);background:var(--gray-50);border-radius:0 7px 7px 0;margin-bottom:6px">
+               <span style="font-size:12.5px;color:var(--accent);font-weight:600">${g.p.nome}</span>
+               <span class="badge badge-gray" style="font-size:10px">Sem missão</span>
+               ${isGestor() ? `<button class="btn btn-secondary btn-sm" style="margin-left:auto;padding:3px 9px;font-size:11px" onclick="abrirProjetoNaAba('${g.p.id}','followup')"><i class="ti ti-pencil-plus"></i> Escrever</button>` : ''}
+             </div>`
+          : `<div style="margin-bottom:9px">
+               <div style="font-size:11.5px;color:var(--accent);font-weight:600;margin-bottom:4px">${g.p.nome}</div>
+               ${g.itens.map(it => _itemMissaoLinha(g.p, g.m, it)).join('')}
+             </div>`).join('')}
+      </div>
+    </div>` : '';
+
   const strip = `<div class="md-strip">
     <div class="md-st"><div class="md-stn" style="color:var(--warn)">${naoFeitas(d.destravar)}</div><div class="md-stl">esperando alguém</div></div>
     <div class="md-st"><div class="md-stn" style="color:#2563eb">${naoFeitas(d.despachar)}</div><div class="md-stl">a despachar</div></div>
@@ -7123,7 +7551,7 @@ function renderMeuDia() {
       É uma sugestão de foco — sua leitura do contexto continua valendo mais.
     </div>`;
 
-  page.innerHTML = filtros + strip + par + fazer + radar + legenda;
+  page.innerHTML = filtros + blocoMissoes + strip + par + fazer + radar + legenda;
 }
 
 // ==================== MINHAS TAREFAS (drill-down: Projeto → Fase → Tarefas) ====================
