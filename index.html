@@ -688,12 +688,7 @@ const DEFAULT_CHECKLIST_TASKS_CUSTOM = [
   {fase:"Fase 4 - Operação assistida",tema:"Geral",tarefa:"Realizar reunião de passagem de conhecimento para suporte",responsavel:"Consultor",esforco:"",help:""},
   {fase:"Fase 4 - Operação assistida",tema:"Geral",tarefa:"Enviar termo de encerramento do projeto",responsavel:"Consultor",esforco:"",help:""}
 ];
-const DEFAULT_DEPARA_TEMPLATE_CUSTOM = [
-  {macroKey:"MOBILIZACAO_E_ESPECIFICACAO",macroNameLabel:"Mobilização e especificação",checklistTaskIds:["ct0","ct1","ct2"]},
-  {macroKey:"DESENVOLVIMENTO",macroNameLabel:"Desenvolvimento",checklistTaskIds:["ct3","ct4","ct5","ct6"]},
-  {macroKey:"TESTES_E_HOMOLOGACAO",macroNameLabel:"Testes e homologação",checklistTaskIds:["ct7","ct8","ct9"]},
-  {macroKey:"OPERACAO_ASSISTIDA",macroNameLabel:"Operação assistida",checklistTaskIds:["ct10","ct11","ct12"]}
-];
+// Checklist de Customização não usa cronograma macro: as tarefas são tratadas direto, sem atividades macro.
 
 // ── Checklists específicos por escopo (projetos só de Ponto / só de RH) ──
 const DEFAULT_CHECKLIST_TASKS_PONTO = [
@@ -749,7 +744,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-10-31-missao-da-semana';
+const DOS_BUILD = '2026-11-04-ordem-checklist-avisos-prazo';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -852,13 +847,16 @@ function loadState() {
   // Customizações têm fluxo próprio (especificação → desenvolvimento → homologação),
   // por isso não recebem a tarefa-marco genérica: quem confirma a virada aqui
   // é "Aplicar em produção", já marcada como marco no próprio checklist.
+  // Versão própria: ao mudar, só o template de Customização é refeito nos navegadores,
+  // sem apagar ajustes locais feitos nos demais templates.
+  const VERSAO_CUSTOM = 11;
   const buildTemplateCustom = () => ({
     id: 'tpl4',
     nome: 'Checklist Customização',
-    descricao: 'Projetos de customização e desenvolvimento — 13 atividades, 4 fases',
-    versao: CHECKLIST_VERSION,
+    descricao: 'Projetos de customização e desenvolvimento — 13 atividades, 4 fases, sem cronograma macro',
+    versao: VERSAO_CUSTOM,
     tasks: DEFAULT_CHECKLIST_TASKS_CUSTOM.map((t,i) => ({id:'ct'+i, status:'pendente', prazo:null, help:'', ...t})),
-    deParaTemplate: JSON.parse(JSON.stringify(DEFAULT_DEPARA_TEMPLATE_CUSTOM))
+    deParaTemplate: []   // sem atividades macro
   });
   const buildTemplatePontoNexus = () => ({
     id: 'tpl5',
@@ -937,7 +935,7 @@ function loadState() {
     { id:'tpl5', build: buildTemplatePontoNexus },
     { id:'tpl6', build: buildTemplatePontoNovos },
     { id:'tpl3', build: buildTemplateRH },
-    { id:'tpl4', build: buildTemplateCustom }
+    { id:'tpl4', build: buildTemplateCustom, versao: VERSAO_CUSTOM }
   ];
   // tpl2 ("Checklist Ponto") era provisório e foi substituído pelos dois acima.
   const TEMPLATES_DESCONTINUADOS = ['tpl2'];
@@ -952,7 +950,7 @@ function loadState() {
       const idx = state.checklistTemplates.findIndex(t => t.id === c.id);
       if (idx === -1) {
         state.checklistTemplates.push(c.build());
-      } else if ((state.checklistTemplates[idx].versao || 1) < CHECKLIST_VERSION) {
+      } else if ((state.checklistTemplates[idx].versao || 1) < (c.versao || CHECKLIST_VERSION)) {
         state.checklistTemplates[idx] = c.build();
       }
     });
@@ -3640,6 +3638,8 @@ function abrirProjeto(id) {
   if (!isGestor() && !projetosVisiveis().find(x=>x.id===id)) return;
   state.currentProjetoId = id;
   state.viewMode = 'lista';
+  state.cronoEdicao = false;
+  state.listaEdicaoPrazos = false;
   state.filterFase = ''; state.filterTema = ''; state.filterStatus = ''; state.filterResp = '';
   state.filterMacro = ''; state.filterMacroStatus = '';
   // Auto-expande a primeira fase (e suas macro entregas) uma vez por projeto, para não abrir tudo colapsado.
@@ -3743,6 +3743,7 @@ function renderProjetoDetail(p) {
       <option value="">Todos os status</option>
       ${Object.entries(STATUS_MAP).map(([k,v])=>`<option value="${k}" ${state.filterStatus===k?'selected':''}>${v.label}</option>`).join('')}
     </select>
+    ${projetoTemMacro(p) ? `
     <select class="filter-select" onchange="state.filterMacro=this.value;renderProjetoDetail(state.projetos.find(x=>x.id===state.currentProjetoId))">
       <option value="">Todas as macro entregas</option>
       ${macroEntregasDoProjeto(p).map(md=>`<option value="${md.key}" ${state.filterMacro===md.key?'selected':''}>${md.nome}</option>`).join('')}
@@ -3755,6 +3756,7 @@ function renderProjetoDetail(p) {
         return `<option value="${k}" ${state.filterMacroStatus===k?'selected':''}>${labels[k]}</option>`;
       }).join('')}
     </select>
+    ` : ''}
     ${isGestor() ? `<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="modalAdicionarTarefa('${p.id}')" title="Incluir uma tarefa específica neste projeto"><i class="ti ti-plus"></i> Nova tarefa</button>` : ''}
     `}
   </div>
@@ -3767,6 +3769,8 @@ function renderProjetoDetail(p) {
 
 function setViewMode(mode) {
   state.viewMode = mode;
+  state.cronoEdicao = false;   // o modo de edição de datas não atravessa abas
+  state.listaEdicaoPrazos = false;
   const p = state.projetos.find(x=>x.id===state.currentProjetoId);
   renderProjetoDetail(p);
 }
@@ -3913,7 +3917,7 @@ function renderGanttCronograma(p, macros) {
         const da = a.startDate || a.endDate || '9999-12-31';
         const db = b.startDate || b.endDate || '9999-12-31';
         if (da !== db) return da < db ? -1 : 1;
-        return (a.name||'').localeCompare(b.name||'');
+        return ((p.macroActivities||[]).indexOf(a) - (p.macroActivities||[]).indexOf(b)) || (a.name||'').localeCompare(b.name||'');
       });
     const datas = [];
     doGrupo.forEach(m => { const a=parseLocalDate(m.startDate), b=parseLocalDate(m.endDate); if(a)datas.push(a); if(b)datas.push(b); });
@@ -4004,8 +4008,11 @@ function simularImpactoPrazo(p, macro, novoFim) {
 // Edição em lote: libera todas as datas de uma vez e aplica tudo num único salvar.
 function entrarModoEdicaoDatas(pId) {
   if (!isGestor()) { notificar('Apenas o gestor de projetos pode alterar o cronograma.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  if (!projetoTemMacro(p)) { notificar('Este projeto não tem cronograma macro: não há datas de macro para editar.', 'erro'); return; }
   state.cronoEdicao = true;
-  renderProjetoDetail(state.projetos.find(x => x.id === pId));
+  renderProjetoDetail(p);
 }
 function sairModoEdicaoDatas(pId) {
   state.cronoEdicao = false;
@@ -4034,6 +4041,7 @@ function salvarTodasDatasMacro(pId) {
   if (!isGestor()) { notificar('Apenas o gestor de projetos pode alterar o cronograma.', 'erro'); return; }
   const p = state.projetos.find(x => x.id === pId);
   if (!p) return;
+  sincronizarVinculosMacro(p);   // inclui tarefas ligadas à macro só pelo campo da tarefa
   const mudancas = _coletarEdicoesDatas(p);
   if (!mudancas.length) { sairModoEdicaoDatas(pId); notificar('Nenhuma data foi alterada.', 'sucesso'); return; }
 
@@ -4047,6 +4055,23 @@ function salvarTodasDatasMacro(pId) {
     totalAlteradas += s.alteradas.length;
     totalPreservadas += s.concluidas + s.manuais;
   });
+  // Tarefas com prazo MANUAL que ficariam depois do novo fim da macro (as automáticas acompanham a macro)
+  const alem = [];
+  mudancas.forEach(c => {
+    if ((c.novoFim || null) === (c.macro.endDate || null)) return;   // só quando o FIM da macro muda
+    const lim = c.novoFim || c.novoIni;
+    if (!lim) return;
+    const mpA = (p.macroMappings || []).find(x => x.macroActivityId === c.macro.id);
+    ((mpA && mpA.microTaskIds) || []).forEach(tid => {
+      const tk = (p.tasks || []).find(x => x.id === tid);
+      if (tk && tk.status !== 'concluida' && tk._prazoManual && tk.prazo && tk.prazo > lim) alem.push({ t: tk, macro: c.macro, lim });
+    });
+  });
+  const avisoAlem = alem.length ? `<div style="margin-top:12px;background:#fffbeb;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e">
+      <strong><i class="ti ti-alert-triangle" style="font-size:13px;vertical-align:-2px"></i> ${alem.length} tarefa(s) com prazo manual ficarão depois do novo fim da macro.</strong>
+      <div style="margin:6px 0">${alem.slice(0, 5).map(a => `<div style="font-size:11.5px">${String(a.t.tarefa || '').replace(/</g,'&lt;')} — prazo ${fmt(a.t.prazo)}, macro "${String(a.macro.name || '').replace(/</g,'&lt;')}" termina em ${fmt(a.lim)}</div>`).join('')}${alem.length > 5 ? `<div style="font-size:11.5px">e mais ${alem.length - 5}...</div>` : ''}</div>
+      Prazos manuais não mudam sozinhos. Para manter assim, use <strong>Aplicar mesmo assim</strong>; depois, ajuste-os na Lista, em <strong>Editar prazos</strong>.
+    </div>` : '';
   // guarda o que foi digitado: o modal substitui o conteúdo da tela
   _edicoesPendentes = mudancas.map(c => ({ macroId: c.macro.id, novoIni: c.novoIni, novoFim: c.novoFim }));
 
@@ -4069,11 +4094,12 @@ function salvarTodasDatasMacro(pId) {
     <div style="background:var(--gray-50);border-radius:8px;padding:10px 12px">
       ${lista}${mudancas.length>8?`<div style="font-size:11px;color:var(--gray-400);padding-top:5px">e mais ${mudancas.length-8}...</div>`:''}
     </div>
+    ${avisoAlem}
     <div style="font-size:11.5px;color:var(--gray-400);margin-top:10px">Esta ação não pode ser desfeita.</div>
   </div>
   <div class="modal-footer">
     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" id="cdBtn" onclick="aplicarDatasEmLote('${pId}')"><i class="ti ti-check"></i> Aplicar e replanejar</button>
+    <button class="btn btn-primary" id="cdBtn" onclick="aplicarDatasEmLote('${pId}')"><i class="ti ti-check"></i> ${alem.length ? 'Aplicar mesmo assim' : 'Aplicar e replanejar'}</button>
   </div>`);
 }
 
@@ -4096,6 +4122,7 @@ async function aplicarDatasEmLote(pId) {
     c.macro.endDate = c.novoFim;
     c.macro.lastUpdatedAt = agora;
   });
+  sincronizarVinculosMacro(p);
   const atualizadas = propagarPrazosMacro(p);
 
   const res = await persistirCronograma(p);
@@ -4223,7 +4250,15 @@ async function salvarDatasMacro(pId, macroId) {
 // Instancia as macro atividades a partir do DE-PARA do template, na criação do
 // projeto. É o que substitui a importação: a estrutura nasce do próprio checklist.
 function instanciarMacrosDoTemplate(projeto, tpl) {
-  if (!tpl || !Array.isArray(tpl.deParaTemplate) || !tpl.deParaTemplate.length) return;
+  if (!tpl || !Array.isArray(tpl.deParaTemplate)) return;
+  if (!tpl.deParaTemplate.length) {
+    // Template sem macros (ex.: Customização): o projeto também fica sem cronograma macro.
+    // Importa na troca de checklist, para não sobrarem macros de um checklist que não existe mais.
+    projeto.macroActivities = [];
+    projeto.macroMappings = [];
+    (projeto.tasks || []).forEach(t => { t.macroActivityId = null; });
+    return;
+  }
   const agora = new Date().toISOString();
   const porTemplateTask = {};
   (projeto.tasks || []).forEach(t => { if (t.templateTaskId) porTemplateTask[t.templateTaskId] = t; });
@@ -4332,7 +4367,9 @@ function previewTrocaChecklist(pId) {
       · <strong>${s.novas}</strong> tarefa(s) do novo checklist serão adicionadas<br>
       · <strong>${s.removidas}</strong> tarefa(s) atuais serão removidas${s.removidasConcluidas?` — <strong>incluindo ${s.removidasConcluidas} já concluída(s)</strong>`:''}<br>
       ${s.preservadas?`· <strong>${s.preservadas}</strong> concluída(s) serão mantidas como registro<br>`:''}
-      · o cronograma macro será refeito (${s.macrosAtuais} atividade(s) atual(is) → ${s.macrosNovas} nova(s)), <strong>perdendo as datas já preenchidas</strong>
+      ${s.macrosNovas === 0
+        ? `· este checklist <strong>não usa cronograma macro</strong>: ${s.macrosAtuais ? `as ${s.macrosAtuais} atividade(s) macro atuais serão removidas, <strong>perdendo as datas já preenchidas</strong>` : 'o projeto seguirá sem atividades macro'}`
+        : `· o cronograma macro será refeito (${s.macrosAtuais} atividade(s) atual(is) → ${s.macrosNovas} nova(s)), <strong>perdendo as datas já preenchidas</strong>`}
     </div>
   </div>`;
 }
@@ -4392,6 +4429,12 @@ async function executarTrocaChecklist(pId) {
         const { error } = await sbClient.from('tasks').insert(rows.slice(i, i + 200));
         if (error) throw new Error(error.message);
       }
+      if (preservadas.length) {
+        // As concluídas preservadas ficam depois das tarefas novas. Regravar a ordem delas evita que o número
+        // antigo colida com o das novas e as misture no meio da sequência do checklist.
+        const rp = await persistirTarefasEmLote(p, preservadas);
+        if (!rp.ok) throw new Error(rp.error);
+      }
       const { data, error: pErr } = await sbClient.from('projects').update({
         template_id: tplId,
         macro_activities: p.macroActivities,
@@ -4413,6 +4456,239 @@ async function executarTrocaChecklist(pId) {
   renderProjetoDetail(p);
   renderSidebar();
   notificar(`Checklist trocado para "${s.tpl.nome}". ${novas.length} tarefa(s) adicionada(s)${manter.length?`, ${manter.length} concluída(s) preservada(s)`:''}.`, 'sucesso');
+}
+
+// ==================== PROJETOS SEM CRONOGRAMA MACRO ====================
+// Projetos pequenos (ex.: Customização) não usam atividades macro: as tarefas ficam
+// direto na fase e não há datas de macro para editar.
+function projetoTemMacro(p) { return Array.isArray(p?.macroActivities) && p.macroActivities.length > 0; }
+
+// Tarefas listadas direto na fase, sem a camada de macro entrega
+function renderTarefasDiretas(p, tasks) {
+  return `<div style="border:1px solid var(--gray-200);border-radius:10px;overflow:hidden;background:#fff">
+    <table style="width:100%">
+      <thead><tr><th style="width:28px"></th><th>Tarefa</th><th>Responsável</th><th>Status</th><th>Prazo</th><th>Esforço</th><th style="width:150px"></th></tr></thead>
+      <tbody>${tasks.map(t => renderHierarchicalTaskRow(p, t)).join('')}</tbody>
+    </table>
+  </div>`;
+}
+
+// Botão "Editar datas" (edição em lote das datas das macros). Sem cronograma macro, fica bloqueado.
+function renderBotaoEditarDatas(p) {
+  if (!isGestor()) return '';
+  if (state.cronoEdicao) {
+    return `<span style="display:inline-flex;gap:6px">
+      <button class="btn btn-secondary btn-sm" onclick="sairModoEdicaoDatas('${p.id}')">Cancelar</button>
+      <button class="btn btn-primary btn-sm" onclick="salvarTodasDatasMacro('${p.id}')"><i class="ti ti-check"></i> Salvar e replanejar</button>
+    </span>`;
+  }
+  const tem = projetoTemMacro(p);
+  return `<button class="btn btn-secondary btn-sm" ${tem ? '' : 'disabled'} style="${tem ? '' : 'opacity:.5;cursor:not-allowed'}"
+      title="${tem ? 'Editar as datas de todas as macros de uma vez' : 'Este projeto não tem cronograma macro'}"
+      onclick="entrarModoEdicaoDatas('${p.id}')"><i class="ti ti-calendar-event"></i> Editar datas</button>
+    ${tem ? '' : '<span style="font-size:11px;color:var(--gray-400)">sem cronograma macro</span>'}`;
+}
+
+// ── Vínculo tarefa ↔ macro ──
+// O vínculo vive em DOIS lugares: t.macroActivityId e macroMappings[].microTaskIds. A tela usa o
+// primeiro; o replanejamento de prazos usa o segundo. Este é o único ponto que grava os dois,
+// para que a tarefa apareça na macro certa E acompanhe as datas dela.
+function vincularTarefaAMacro(p, t, macroId) {
+  if (!Array.isArray(p.macroMappings)) p.macroMappings = [];
+  const agora = new Date().toISOString();
+  p.macroMappings.forEach(mp => {
+    if (Array.isArray(mp.microTaskIds) && mp.microTaskIds.includes(t.id)) {
+      mp.microTaskIds = mp.microTaskIds.filter(id => id !== t.id);
+      mp.updatedAt = agora;
+    }
+  });
+  t.macroActivityId = macroId || null;
+  if (!macroId) return;
+  let mp = p.macroMappings.find(x => x.macroActivityId === macroId);
+  if (!mp) {
+    const m = (p.macroActivities || []).find(a => a.id === macroId);
+    mp = { id: uid(), macroKey: (m && m.macroKey) || null, macroActivityId: macroId,
+           macroExternalId: (m && m.externalId) || null, macroNameSnapshot: (m && m.name) || '',
+           microTaskIds: [], origem: 'manual', createdAt: agora, updatedAt: agora };
+    p.macroMappings.push(mp);
+  }
+  if (!Array.isArray(mp.microTaskIds)) mp.microTaskIds = [];
+  if (!mp.microTaskIds.includes(t.id)) mp.microTaskIds.push(t.id);
+  mp.updatedAt = agora;
+}
+
+// Corrige tarefas ligadas a uma macro só por t.macroActivityId (criadas por "Nova tarefa" ou
+// religadas no detalhe antes desta correção). Retorna quantas foram ajustadas.
+function sincronizarVinculosMacro(p) {
+  const macros = Array.isArray(p.macroActivities) ? p.macroActivities : [];
+  if (!macros.length) return 0;
+  const ids = new Set(macros.map(m => m.id));
+  const mappings = Array.isArray(p.macroMappings) ? p.macroMappings : [];
+  let corrigidos = 0;
+  (p.tasks || []).forEach(t => {
+    if (!t.macroActivityId || !ids.has(t.macroActivityId)) return;
+    const alvo = mappings.find(x => x.macroActivityId === t.macroActivityId);
+    const jaEsta = !!alvo && (alvo.microTaskIds || []).includes(t.id);
+    const emOutro = mappings.some(x => x !== alvo && (x.microTaskIds || []).includes(t.id));
+    if (jaEsta && !emOutro) return;
+    vincularTarefaAMacro(p, t, t.macroActivityId);
+    corrigidos++;
+  });
+  return corrigidos;
+}
+
+// ==================== PRAZOS DAS TAREFAS EM LOTE (aba Lista) ====================
+// "Editar prazos" libera o prazo de todas as tarefas de uma vez e salva tudo junto. Quando a tarefa
+// pertence a uma macro, o prazo não pode passar do fim dela. Sem macros, os campos só ficam livres.
+
+// Limite do prazo de uma tarefa: o fim da macro (ou o início, se a macro não tem fim). null = sem limite.
+function limiteMacroDaTarefa(p, t) {
+  const d = resolveTaskMacroDelivery(p, t);
+  if (!d.hasDelivery) return null;
+  return d.endDate || d.startDate || null;
+}
+
+function renderBotaoEditarPrazos(p) {
+  if (!isGestor()) return '';
+  if (state.listaEdicaoPrazos) {
+    return `<span style="display:inline-flex;gap:6px">
+      <button class="btn btn-secondary btn-sm" onclick="sairModoEdicaoPrazos('${p.id}')">Cancelar</button>
+      <button class="btn btn-primary btn-sm" onclick="salvarPrazosEmLote('${p.id}')"><i class="ti ti-check"></i> Salvar prazos</button>
+    </span>`;
+  }
+  return `<button class="btn btn-secondary btn-sm" title="Editar o prazo de todas as tarefas de uma vez" onclick="entrarModoEdicaoPrazos('${p.id}')"><i class="ti ti-calendar-event"></i> Editar prazos</button>`;
+}
+
+function entrarModoEdicaoPrazos(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode editar prazos.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  state.listaEdicaoPrazos = true;
+  expandAllHierarchy(pId);   // abre fases e macros, para os campos de prazo ficarem à vista (e redesenha a Lista)
+}
+function sairModoEdicaoPrazos(pId) {
+  state.listaEdicaoPrazos = false;
+  const p = state.projetos.find(x => x.id === pId);
+  if (p) renderTaskView(p);
+}
+
+// Lê os campos da tela e devolve só o que mudou
+function _coletarEdicoesPrazos(p) {
+  const mudancas = [];
+  (p.tasks || []).forEach(t => {
+    const campo = document.getElementById('ep-' + t.id);
+    if (!campo) return;
+    const novo = campo.value || '';
+    if (novo !== (t.prazo || '')) mudancas.push({ t, novo });
+  });
+  return mudancas;
+}
+
+let _prazosPendentes = null;
+
+function salvarPrazosEmLote(pId) {
+  if (!isGestor()) { notificar('Apenas o gestor de projetos pode editar prazos.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p) return;
+  const mudancas = _coletarEdicoesPrazos(p);
+  if (!mudancas.length) { sairModoEdicaoPrazos(pId); notificar('Nenhum prazo foi alterado.', 'sucesso'); return; }
+  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+  // 1) Nenhuma tarefa pode passar do fim da macro. Se alguma passar, nada é salvo.
+  const acima = mudancas.filter(c => { const lim = limiteMacroDaTarefa(p, c.t); return c.novo && lim && c.novo > lim; });
+  if (acima.length) {
+    openModal(`<div class="modal-header">
+      <div class="modal-title" style="color:var(--danger)"><i class="ti ti-alert-triangle" style="margin-right:8px"></i>Prazo além do fim da macro</div>
+      <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;color:var(--gray-700);margin-bottom:10px"><strong>Nada foi salvo.</strong> ${acima.length === 1 ? 'Esta tarefa passa' : 'Estas ' + acima.length + ' tarefas passam'} do fim da macro a que pertence${acima.length === 1 ? '' : 'm'}:</div>
+      <div style="background:var(--gray-50);border-radius:8px;padding:10px 12px;max-height:240px;overflow-y:auto">
+        ${acima.map(c => { const d = resolveTaskMacroDelivery(p, c.t); return `<div style="padding:5px 0;border-top:1px solid var(--gray-100);font-size:12px">
+          <div style="color:var(--gray-800);font-weight:600">${esc(c.t.tarefa)}</div>
+          <div style="color:var(--gray-500)">${esc(d.macroName)} · você informou <strong style="color:var(--danger)">${fmt(c.novo)}</strong>, a macro termina em <strong>${fmt(limiteMacroDaTarefa(p, c.t))}</strong></div>
+        </div>`; }).join('')}
+      </div>
+      <div style="font-size:11.5px;color:var(--gray-500);margin-top:10px">Ajuste a data para o fim da macro ou antes dele. Se a macro precisar de mais tempo, altere a data dela na aba Cronograma macro.</div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-primary" onclick="closeModal()">Voltar e ajustar</button></div>`);
+    return;
+  }
+
+  // 2) Confirmação do que será gravado
+  const seguem = mudancas.filter(c => !c.novo && limiteMacroDaTarefa(p, c.t)).length;
+  const semPrazo = mudancas.filter(c => !c.novo && !limiteMacroDaTarefa(p, c.t)).length;
+  _prazosPendentes = mudancas.map(c => ({ taskId: c.t.id, novo: c.novo }));
+  const linhas = mudancas.slice(0, 8).map(c => {
+    const lim = limiteMacroDaTarefa(p, c.t);
+    const para = c.novo ? fmt(c.novo) : (lim ? 'segue a macro (' + fmt(lim) + ')' : 'sem prazo');
+    return `<div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:3px 0;border-top:1px solid var(--gray-100)">
+      <span style="color:var(--gray-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.t.tarefa)}</span>
+      <span style="color:var(--gray-500);white-space:nowrap">${c.t.prazo ? fmt(c.t.prazo) : 'sem prazo'} → <strong style="color:var(--accent)">${para}</strong></span>
+    </div>`;
+  }).join('');
+  openModal(`<div class="modal-header">
+    <div class="modal-title"><i class="ti ti-calendar-event" style="margin-right:8px;color:var(--accent)"></i>Confirmar novos prazos</div>
+    <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
+  </div>
+  <div class="modal-body">
+    <div style="font-size:13px;color:var(--gray-700);line-height:1.7;margin-bottom:12px">
+      <strong style="color:var(--accent)">${mudancas.length}</strong> prazo(s) de tarefa serão alterados.
+      ${seguem ? `<br>${seguem} voltam a seguir a data da macro.` : ''}${semPrazo ? `<br>${semPrazo} ficam sem prazo.` : ''}
+    </div>
+    <div style="background:var(--gray-50);border-radius:8px;padding:10px 12px">
+      ${linhas}${mudancas.length > 8 ? `<div style="font-size:11px;color:var(--gray-400);padding-top:5px">e mais ${mudancas.length - 8}...</div>` : ''}
+    </div>
+    <div style="font-size:11.5px;color:var(--gray-400);margin-top:10px">Prazos digitados aqui passam a valer só para a tarefa: não mudam mais quando a macro for replanejada.</div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-primary" id="cpBtn" onclick="aplicarPrazosEmLote('${pId}')"><i class="ti ti-check"></i> Salvar prazos</button>
+  </div>`);
+}
+
+// Grava só as tarefas alteradas (não reescreve o cronograma do projeto)
+async function persistirTarefasEmLote(projeto, tarefas) {
+  if (!sbClient) return { ok: false, error: 'Sem conexão com o servidor.' };
+  try {
+    const rows = tarefas.map(t => _tarefaParaRow(t, projeto.id, (projeto.tasks || []).indexOf(t)));
+    const { error } = await sbClient.from('tasks').upsert(rows, { onConflict: 'id' });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+async function aplicarPrazosEmLote(pId) {
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p || !_prazosPendentes) return;
+  const btn = document.getElementById('cpBtn');
+  const lbl = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2"></i> Salvando...'; }
+  const antes = [], afetadas = [];
+  _prazosPendentes.forEach(e => {
+    const t = (p.tasks || []).find(x => x.id === e.taskId);
+    if (!t) return;
+    antes.push({ t, prazo: t.prazo, origem: t.prazoOrigem, manual: t._prazoManual });
+    const lim = limiteMacroDaTarefa(p, t);
+    if (e.novo) { t.prazo = e.novo; t._prazoManual = true; t.prazoOrigem = 'manual'; }
+    else if (lim) { t.prazo = lim; t._prazoManual = false; t.prazoOrigem = 'macro'; }   // volta a seguir a macro
+    else { t.prazo = null; t._prazoManual = false; t.prazoOrigem = null; }
+    afetadas.push(t);
+  });
+  const res = await persistirTarefasEmLote(p, afetadas);
+  if (!res.ok) {
+    antes.forEach(a => { a.t.prazo = a.prazo; a.t.prazoOrigem = a.origem; a.t._prazoManual = a.manual; });
+    if (btn) { btn.disabled = false; btn.innerHTML = lbl; }
+    notificar('Não foi possível salvar os prazos: ' + res.error + ' Nada foi alterado.', 'erro');
+    return;
+  }
+  _prazosPendentes = null;
+  state.listaEdicaoPrazos = false;
+  saveState();
+  closeModal();
+  renderProjetoDetail(p);
+  renderSidebar();
+  notificar(`${afetadas.length} prazo(s) atualizado(s).`, 'sucesso');
 }
 
 // ==================== EXCLUSÃO DE PROJETO ====================
@@ -5005,17 +5281,16 @@ function renderCronogramaMacro(p) {
   const container = document.getElementById('task-view');
   const macros = Array.isArray(p.macroActivities) ? p.macroActivities : [];
 
-  // Estado vazio: nenhuma atividade macro importada
+  // Projeto sem cronograma macro (ex.: Customização): não há datas de macro para editar
   if (!macros.length) {
     container.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">${renderBotaoEditarDatas(p)}</div>
       <div class="card">
         <div class="empty">
           <i class="ti ti-timeline"></i>
-          <p>Nenhuma atividade macro importada</p>
-          <small>Importe o cronograma oficial do projeto para vincular as tarefas às atividades macro.</small>
-          <div style="margin-top:16px">
-            <button class="btn btn-primary" onclick="modalImportarCronograma('${p.id}')"><i class="ti ti-upload"></i> Importar cronograma</button>
-          </div>
+          <p>Este projeto não tem cronograma macro</p>
+          <small>Projetos sem atividades macro trabalham direto com as tarefas. Ajuste os prazos pela edição de cada tarefa, na aba Lista.</small>
+          ${isGestor() ? `<div style="margin-top:16px"><button class="btn btn-secondary btn-sm" onclick="modalImportarCronograma('${p.id}')"><i class="ti ti-upload"></i> Importar cronograma</button></div>` : ''}
         </div>
       </div>`;
     return;
@@ -5037,7 +5312,7 @@ function renderCronogramaMacro(p) {
         const da = a.startDate || a.endDate || '9999-12-31';
         const db = b.startDate || b.endDate || '9999-12-31';
         if (da !== db) return da < db ? -1 : 1;
-        return (a.name||'').localeCompare(b.name||'');
+        return ((p.macroActivities||[]).indexOf(a) - (p.macroActivities||[]).indexOf(b)) || (a.name||'').localeCompare(b.name||'');
       })
       .forEach(m => macrosOrdenadas.push(m));
   });
@@ -6359,14 +6634,26 @@ function sortMacroDeliveries(list) {
     const ah = am && am.hierarchyCode ? am.hierarchyCode : '';
     const bh = bm && bm.hierarchyCode ? bm.hierarchyCode : '';
     if (ah && bh && ah !== bh) return ah.localeCompare(bh, undefined, {numeric:true});
+    // sem data (ou com a mesma data): sequência do checklist, e não ordem alfabética
+    if (a.posChecklist != null && b.posChecklist != null && a.posChecklist !== b.posChecklist) return a.posChecklist - b.posChecklist;
     const an = (am && am.name) || (a.mapping && a.mapping.macroNameSnapshot) || '';
     const bn = (bm && bm.name) || (b.mapping && b.mapping.macroNameSnapshot) || '';
     return an.localeCompare(bn);
   });
 }
 
-// Ordena tarefas: 1) macroOrder; 2) ordem no projeto (preserva); 3) prazo; 4) nome.
-function sortHierarchyTasks(tasks) {
+// Posição de cada tarefa na sequência do checklist. A ordem do array de tarefas do projeto é a ordem em que
+// o checklist as definiu (gravada em tasks.ordem e relida na carga), então o índice no array é a referência.
+function ordemDasTarefas(p) {
+  const m = new Map();
+  ((p && p.tasks) || []).forEach((t, i) => m.set(t.id, i));
+  return m;
+}
+
+// Ordena tarefas: 1) macroOrder; 2) sequência do checklist; 3) prazo; 4) nome.
+// (O item 2 constava no comentário mas não estava implementado: sem ele, as tarefas de uma macro, que
+// herdam o mesmo prazo, caíam em ordem alfabética.)
+function sortHierarchyTasks(tasks, ordem) {
   const modo = state.ordenacaoLista || 'padrao';
   if (modo === 'vencimento') {
     // Ordena por prazo (mais próximo primeiro); tarefas sem prazo ao final; concluídas ao fim.
@@ -6381,6 +6668,10 @@ function sortHierarchyTasks(tasks) {
   // padrão: macroOrder → ordem do projeto → prazo → nome
   return [...tasks].sort((a,b) => {
     if (a.macroOrder != null && b.macroOrder != null && a.macroOrder !== b.macroOrder) return a.macroOrder - b.macroOrder;
+    if (ordem) {
+      const ia = ordem.get(a.id), ib = ordem.get(b.id);
+      if (ia != null && ib != null && ia !== ib) return ia - ib;
+    }
     const ap = a.prazo || '9999-12-31', bp = b.prazo || '9999-12-31';
     if (ap !== bp) return ap < bp ? -1 : 1;
     return (a.tarefa||'').localeCompare(b.tarefa||'');
@@ -6394,8 +6685,20 @@ function groupProjectTasksHierarchy(project, tasks) {
   const fasesPresentes = ordemFases.filter(f => tasks.some(t => t.fase === f));
   [...new Set(tasks.map(t => t.fase))].forEach(f => { if (!fasesPresentes.includes(f)) fasesPresentes.push(f); });
 
+  const ordem = ordemDasTarefas(project);
   return fasesPresentes.map(fase => {
     const tsFase = tasks.filter(t => t.fase === fase);
+    // Posição de cada macro na sequência do checklist: a 1ª tarefa dela NESTA fase, olhando o projeto inteiro
+    // (assim a ordem das macros não muda quando há filtro ativo na Lista)
+    const posMacro = new Map();
+    (project.tasks || []).forEach(t => {
+      if (t.fase !== fase) return;
+      const dd = resolveTaskMacroDelivery(project, t);
+      if (!dd.hasDelivery) return;
+      const ch = dd.macroActivityId || dd.macroKey || dd.macroName;
+      const i = ordem.get(t.id);
+      if (!posMacro.has(ch) || i < posMacro.get(ch)) posMacro.set(ch, i);
+    });
     // agrupa por macro entrega dentro da fase
     const byDelivery = new Map(); // chave estável → {macroActivity, mapping, tasks}
     const unmapped = [];
@@ -6403,14 +6706,14 @@ function groupProjectTasksHierarchy(project, tasks) {
       const d = resolveTaskMacroDelivery(project, t);
       if (!d.hasDelivery) { unmapped.push(t); return; }
       const chave = d.macroActivityId || d.macroKey || d.macroName;
-      if (!byDelivery.has(chave)) byDelivery.set(chave, { macroActivity: d._macro, mapping: d._mapping, tasks: [] });
+      if (!byDelivery.has(chave)) byDelivery.set(chave, { chave, macroActivity: d._macro, mapping: d._mapping, tasks: [] });
       byDelivery.get(chave).tasks.push(t);
     });
 
     let macroDeliveries = [...byDelivery.values()].map(entry => {
       const prog = calculateMacroDeliveryProgress(project, entry.macroActivity, entry.tasks);
       const status = determineMacroDeliveryStatus(entry.macroActivity, entry.mapping, prog);
-      return { macroActivity: entry.macroActivity, mapping: entry.mapping, status, progress: prog, tasks: sortHierarchyTasks(entry.tasks) };
+      return { macroActivity: entry.macroActivity, mapping: entry.mapping, status, progress: prog, posChecklist: posMacro.get(entry.chave), tasks: sortHierarchyTasks(entry.tasks, ordem) };
     });
     macroDeliveries = sortMacroDeliveries(macroDeliveries);
 
@@ -6425,7 +6728,7 @@ function groupProjectTasksHierarchy(project, tasks) {
       phaseKey: fase, phaseName: fase,
       totals: { macroDeliveries: macroDeliveries.length, tasks: allFaseTasks.length, completed, overdue, blocked, progress },
       macroDeliveries,
-      unmappedTasks: sortHierarchyTasks(unmapped)
+      unmappedTasks: sortHierarchyTasks(unmapped, ordem)
     };
   });
 }
@@ -6514,14 +6817,19 @@ function renderLista(tasks, p, container) {
           <option value="vencimento" ${state.ordenacaoLista==='vencimento'?'selected':''}>Data de vencimento (mais próximo primeiro)</option>
         </select>
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${renderBotaoEditarPrazos(p)}
         <button class="btn btn-secondary btn-sm" onclick="expandAllHierarchy('${p.id}')"><i class="ti ti-arrows-maximize"></i> Expandir tudo</button>
         <button class="btn btn-secondary btn-sm" onclick="collapseAllHierarchy('${p.id}')"><i class="ti ti-arrows-minimize"></i> Recolher tudo</button>
       </div>
     </div>`;
 
   const blocos = grupos.map(g => renderPhaseGroup(p, g)).join('');
-  container.innerHTML = acoes + blocos;
+  const avisoEdicao = (state.listaEdicaoPrazos && isGestor()) ? `<div class="card" style="margin-bottom:12px;padding:10px 14px;background:#fffbeb;border-color:#fed7aa">
+      <div style="font-size:12.5px;color:#92400e"><i class="ti ti-pencil" style="font-size:13px;vertical-align:-2px"></i>
+        Modo de edição: ajuste o prazo das tarefas e clique em <strong>Salvar prazos</strong>.${projetoTemMacro(p) ? ' O prazo de uma tarefa não pode passar do fim da macro a que ela pertence (a data limite aparece abaixo do campo).' : ''} Tarefas concluídas não são editadas.</div>
+    </div>` : '';
+  container.innerHTML = acoes + avisoEdicao + blocos;
 }
 
 // Nível 2 — Fase
@@ -6532,8 +6840,10 @@ function renderPhaseGroup(p, g) {
   const fc = FASE_COLORS[fase] || {bg:'#f1f5f9',color:'#64748b'};
   const T = g.totals;
 
+  // Projeto sem cronograma macro (ex.: Customização): tarefas direto na fase, sem a camada de macro
+  const semMacro = !projetoTemMacro(p);
   const corpoMacros = g.macroDeliveries.map(d => renderMacroDeliveryGroup(p, fase, d)).join('');
-  const corpoUnmapped = g.unmappedTasks.length ? renderUnmappedGroup(p, fase, g.unmappedTasks) : '';
+  const corpoUnmapped = !g.unmappedTasks.length ? '' : (semMacro ? renderTarefasDiretas(p, g.unmappedTasks) : renderUnmappedGroup(p, fase, g.unmappedTasks));
 
   return `<div class="card" style="margin-bottom:12px;padding:0;overflow:hidden">
     <div onclick="togglePhaseExpansion('${p.id}','${fase.replace(/'/g,"\\'")}')"
@@ -6541,7 +6851,7 @@ function renderPhaseGroup(p, g) {
       <i class="ti ti-chevron-${aberto?'down':'right'}" style="font-size:16px;color:${fc.color}"></i>
       <i class="ti ti-folder" style="font-size:16px;color:${fc.color}"></i>
       <div style="font-size:13px;font-weight:700;color:${fc.color};flex:1">${fase}</div>
-      <span style="font-size:11px;color:${fc.color};opacity:.85">${T.macroDeliveries} macro entrega${T.macroDeliveries!==1?'s':''} · ${T.tasks} tarefa${T.tasks!==1?'s':''}</span>
+      <span style="font-size:11px;color:${fc.color};opacity:.85">${semMacro ? '' : `${T.macroDeliveries} macro entrega${T.macroDeliveries!==1?'s':''} · `}${T.tasks} tarefa${T.tasks!==1?'s':''}</span>
       ${T.blocked>0 ? `<span class="badge badge-red" style="font-size:10px"><i class="ti ti-lock"></i>${T.blocked}</span>` : ''}
       ${T.overdue>0 ? `<span class="badge badge-red" style="font-size:10px"><i class="ti ti-alert-triangle"></i>${T.overdue}</span>` : ''}
       <span style="font-size:11px;color:${fc.color};opacity:.85">${T.completed}/${T.tasks}</span>
@@ -6653,6 +6963,13 @@ function renderHierarchicalTaskRow(p, t) {
     const peso = (vencida||hoje||proximo) ? '700' : '500';
     const sufixo = t.status==='concluida' ? '' : (vencida ? ` (${Math.abs(dl)}d atraso)` : hoje ? ' (hoje)' : dl===1 ? ' (amanhã)' : proximo ? ` (${dl}d)` : '');
     prazoHTML = `<span style="font-size:12.5px;color:${cor};font-weight:${peso};white-space:nowrap">${vencida?'<i class="ti ti-alert-triangle" style="font-size:12px;vertical-align:-1px"></i> ':''}${fmt(t.prazo)}${sufixo}</span>`;
+  }
+  if (state.listaEdicaoPrazos && isGestor() && t.status !== 'concluida') {
+    const lim = limiteMacroDaTarefa(p, t);
+    prazoHTML = `<div style="display:flex;flex-direction:column;gap:2px">
+      <input type="date" class="form-input" style="padding:3px 6px;font-size:12px;width:140px" id="ep-${t.id}" value="${t.prazo||''}" ${lim ? `max="${lim}"` : ''}>
+      ${lim ? `<span style="font-size:10.5px;color:var(--gray-400)">até ${fmt(lim)} (fim da macro)</span>` : ''}
+    </div>`;
   }
   return `<tr ${vencida?'style="background:#fef2f2"':''}>
     <td><input type="checkbox" class="task-check" ${t.status==='concluida'?'checked':''} onchange="toggleTask('${p.id}','${t.id}',this.checked)"></td>
@@ -6812,7 +7129,7 @@ function renderKanban(tasks, p, container) {
         </div>
         ${gtasks.map(t => {
           const d = resolveTaskMacroDelivery(p, t);
-          const ctx = d.hasDelivery ? `${t.fase.replace(/^Fase\s*/,'Fase ').split(' - ')[0]} · ${d.macroName}` : `${t.fase.split(' - ')[0]} · sem macro entrega`;
+          const ctx = d.hasDelivery ? `${t.fase.replace(/^Fase\s*/,'Fase ').split(' - ')[0]} · ${d.macroName}` : (projetoTemMacro(p) ? `${t.fase.split(' - ')[0]} · sem macro entrega` : `${t.fase.split(' - ')[0]}`);
           return `<div class="kanban-card" style="border-left-color:${TEMA_COLORS[t.tema]||'#64748b'}" onclick="abrirTarefa('${p.id}','${t.id}')">
           <div style="font-size:10px;color:var(--gray-400);margin-bottom:3px;line-height:1.3"><i class="ti ti-package" style="font-size:10px;vertical-align:-1px"></i> ${ctx}</div>
           <div class="kanban-card-title">${t.tarefa} ${helpIconHTML(t)}</div>
@@ -6857,7 +7174,8 @@ function renderCalendario(tasks, p, container) {
       <div class="cal-date${isToday?' today-num':''}">${d}</div>
       ${dayTasks.slice(0,3).map(t=>{
         const d = resolveTaskMacroDelivery(p, t);
-        const tip = `${p.nome} · ${t.fase} · ${d.hasDelivery?d.macroName:'sem macro entrega'} · ${t.tarefa}${t.responsavel?' · '+t.responsavel:''}${t.prazo?' · '+fmt(t.prazo):''}`;
+        const macroTip = d.hasDelivery ? d.macroName : (projetoTemMacro(p) ? 'sem macro entrega' : '');
+        const tip = `${p.nome} · ${t.fase} · ${macroTip ? macroTip + ' · ' : ''}${t.tarefa}${t.responsavel?' · '+t.responsavel:''}${t.prazo?' · '+fmt(t.prazo):''}`;
         return `<div class="cal-task" style="background:${TEMA_COLORS[t.tema]||'#64748b'}22;color:${TEMA_COLORS[t.tema]||'#64748b'}" onclick="abrirTarefa('${p.id}','${t.id}')" title="${tip.replace(/"/g,'&quot;')}">${t.tarefa}</div>`;
       }).join('')}
       ${dayTasks.length>3?`<div style="font-size:9px;color:var(--gray-400)">+${dayTasks.length-3} mais</div>`:''}
@@ -6922,16 +7240,25 @@ function toggleBloqueioCampos() {
   }
 }
 
+// Confirmação de prazo além do fim da macro (clicar de novo em "Confirmar e salvar")
+let _prazoAcimaConfirmado = null;
+let _avisoNovaTarefa = null;
+
 function abrirTarefa(pId, tId) {
   const p = state.projetos.find(x=>x.id===pId);
   const t = p?.tasks?.find(x=>x.id===tId);
   if (!t) return;
+  _prazoAcimaConfirmado = null;
   const fc = FASE_COLORS[t.fase]||{bg:'#f1f5f9',color:'#64748b'};
   openModal(`<div class="modal-header">
     <div class="modal-title" style="flex:1;padding-right:12px">${t.tarefa}</div>
     <button class="btn btn-ghost" onclick="closeModal()"><i class="ti ti-x"></i></button>
   </div>
   <div class="modal-body">
+    ${isGestor() ? `<div class="form-group">
+      <label class="form-label">Nome da tarefa</label>
+      <input class="form-input" id="tNome" value="${String(t.tarefa||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}">
+    </div>` : ''}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
       ${faseBadge(t.fase)}
       <span class="badge" style="background:${(TEMA_COLORS[t.tema]||'#64748b')}18;color:${TEMA_COLORS[t.tema]||'#64748b'}">${t.tema}</span>
@@ -6982,18 +7309,19 @@ function abrirTarefa(pId, tId) {
     <div class="form-group">
       <label class="form-label">Prazo</label>
       <input type="date" class="form-input" id="tPrazo" value="${t.prazo||''}">
+      ${(() => { const lim = limiteMacroDaTarefa(p, t); return lim ? `<div style="font-size:11px;color:var(--gray-400);margin-top:4px">A macro desta tarefa termina em ${fmt(lim)}.</div>` : ''; })()}
     </div>
+    <div id="tAvisoMacro" style="display:none;margin-bottom:14px;background:#fffbeb;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e"></div>
     ${t.status==='concluida' && t.concluidaEm ? `<div style="font-size:11.5px;color:var(--success);margin:-6px 0 14px;display:flex;align-items:center;gap:5px">
       <i class="ti ti-circle-check" style="font-size:13px"></i> Concluída em ${new Date(t.concluidaEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
     </div>` : ''}
-    <div class="form-group">
+    ${projetoTemMacro(p) ? `<div class="form-group">
       <label class="form-label">Atividade macro vinculada <span style="font-weight:400;color:var(--gray-400)">(opcional)</span></label>
       <select class="form-input form-select" id="tMacroActivity">
         <option value="">Nenhuma</option>
-        ${(Array.isArray(p.macroActivities)?p.macroActivities:[]).map(m=>`<option value="${m.id}" ${t.macroActivityId===m.id?'selected':''}>${m.name||'(sem nome)'}${m.phase?' — '+m.phase:''}</option>`).join('')}
+        ${(Array.isArray(p.macroActivities)?p.macroActivities:[]).map(m=>`<option value="${m.id}" ${(resolveTaskMacroDelivery(p,t).macroActivityId||t.macroActivityId)===m.id?'selected':''}>${m.name||'(sem nome)'}${m.phase?' — '+m.phase:''}</option>`).join('')}
       </select>
-      ${(!p.macroActivities || !p.macroActivities.length) ? `<div style="font-size:11px;color:var(--gray-400);margin-top:5px"><i class="ti ti-info-circle" style="font-size:11px;vertical-align:-1px"></i> Importe o cronograma macro na aba do projeto para habilitar a vinculação.</div>` : ''}
-    </div>
+    </div>` : ''}
     <div class="form-group">
       <label class="form-label">Comentário / Observação</label>
       <textarea class="form-input form-textarea" id="tComentario" placeholder="Adicione notas ou observações...">${t.comentario||''}</textarea>
@@ -7001,7 +7329,7 @@ function abrirTarefa(pId, tId) {
   </div>
   <div class="modal-footer">
     <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
-    <button class="btn btn-primary" onclick="salvarTarefa('${pId}','${tId}')"><i class="ti ti-check"></i> Salvar</button>
+    <button class="btn btn-primary" id="tBtnSalvar" onclick="salvarTarefa('${pId}','${tId}')"><i class="ti ti-check"></i> Salvar</button>
   </div>`, true);
 }
 
@@ -7009,6 +7337,45 @@ function salvarTarefa(pId, tId) {
   const p = state.projetos.find(x=>x.id===pId);
   const t = p?.tasks?.find(x=>x.id===tId);
   if (!t) return;
+  // Prazo além do fim da macro: avisa e pede confirmação. A 1ª vez não salva nada; ao clicar de novo no
+  // botão (agora "Confirmar e salvar"), o prazo é mantido. Mudar a data de novo pede nova confirmação.
+  const campoPrazoW = document.getElementById('tPrazo');
+  if (campoPrazoW) {
+    const prazoW = campoPrazoW.value || '';
+    const selMacroW = document.getElementById('tMacroActivity');
+    const macroAntesW = resolveTaskMacroDelivery(p, t).macroActivityId || t.macroActivityId || '';
+    const macroW = selMacroW ? (selMacroW.value || '') : macroAntesW;
+    const mObjW = macroW ? (p.macroActivities || []).find(m => m.id === macroW) : null;
+    const limW = mObjW ? (mObjW.endDate || mObjW.startDate || null) : null;
+    const mudouW = prazoW !== (t.prazo || '') || macroW !== macroAntesW;
+    if (prazoW && limW && prazoW > limW && mudouW) {
+      const chaveW = tId + '|' + prazoW + '|' + macroW;
+      if (_prazoAcimaConfirmado !== chaveW) {
+        _prazoAcimaConfirmado = chaveW;
+        const caixaW = document.getElementById('tAvisoMacro');
+        if (caixaW) {
+          caixaW.innerHTML = `<strong><i class="ti ti-alert-triangle" style="font-size:13px;vertical-align:-2px"></i> Prazo depois do fim da macro.</strong><br>
+            O prazo informado (<strong>${fmt(prazoW)}</strong>) é depois do fim da macro "${(mObjW.name || '').replace(/</g,'&lt;')}" (<strong>${fmt(limW)}</strong>).
+            Para manter essa data, clique em <strong>Confirmar e salvar</strong>. Para ajustar, mude o prazo.`;
+          caixaW.style.display = 'block';
+        }
+        const btW = document.getElementById('tBtnSalvar');
+        if (btW) btW.innerHTML = '<i class="ti ti-alert-triangle"></i> Confirmar e salvar';
+        return;
+      }
+    }
+    _prazoAcimaConfirmado = null;
+  }
+  // Nome da tarefa: só o gestor altera
+  const campoNome = document.getElementById('tNome');
+  if (campoNome && isGestor()) {
+    const novoNome = campoNome.value.trim();
+    if (!novoNome) { notificar('O nome da tarefa não pode ficar vazio.', 'erro'); return; }
+    if (novoNome !== t.tarefa) {
+      if (isGoLiveMarkerTask(t)) t._goLiveMarker = true;   // o marco passa a ser identificado pela marcação, não pelo nome
+      t.tarefa = novoNome;
+    }
+  }
   aplicarStatusTarefa(t, document.getElementById('tStatus').value);
   const novoPrazo = document.getElementById('tPrazo').value;
   // Se o usuário alterou o prazo manualmente, marca para não ser sobrescrito pelas datas da macro
@@ -7028,9 +7395,18 @@ function salvarTarefa(pId, tId) {
   }
   // Vínculo opcional com atividade macro do cronograma
   const macroSel = document.getElementById('tMacroActivity');
-  if (macroSel) t.macroActivityId = macroSel.value || null;
+  const macroAntes = resolveTaskMacroDelivery(p, t).macroActivityId || t.macroActivityId || '';
+  let vinculoMudou = false;
+  if (macroSel && (macroSel.value || '') !== macroAntes) {
+    vincularTarefaAMacro(p, t, macroSel.value || null);   // grava o vínculo nas duas fontes
+    vinculoMudou = true;
+  }
   saveState();
-  persistirTarefa(pId, t);
+  if (vinculoMudou) {
+    persistirCronograma(p, [t]).then(r => { if (!r.ok) notificar('Não foi possível gravar o vínculo com a macro: ' + r.error + ' Recarregue a página para conferir.', 'erro'); });
+  } else {
+    persistirTarefa(pId, t);
+  }
   closeModal();
   // Atualiza sidebar badge e recarrega a página de origem
   renderSidebar();
@@ -7046,6 +7422,7 @@ function modalAdicionarTarefa(pId) {
   if (!isGestor()) { notificar('Apenas o gestor de projetos pode incluir tarefas.', 'erro'); return; }
   const p = state.projetos.find(x => x.id === pId);
   if (!p) return;
+  _avisoNovaTarefa = null;
   // As fases vêm do checklist DESTE projeto — cada template tem as suas.
   // (Só cai nas fases do sistema se o projeto ainda não tiver tarefa alguma.)
   const fasesProjeto = _ordenarFases([...new Set((p.tasks || []).map(t => t.fase).filter(Boolean))]);
@@ -7063,6 +7440,7 @@ function modalAdicionarTarefa(pId) {
       <span>Esta tarefa será incluída <strong>somente neste projeto</strong>. O checklist padrão e os demais projetos não são alterados.</span>
     </div>
     <div id="ntAlert" class="form-alert" style="display:none"><i class="ti ti-alert-circle" style="font-size:15px"></i><span id="ntAlertMsg"></span></div>
+    <div id="ntAviso" style="display:none;margin-bottom:12px;background:#fffbeb;border:1px solid #fed7aa;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e"></div>
     <div class="form-group"><label class="form-label">Tarefa <span class="req-star">*</span></label>
       <input class="form-input" id="ntTarefa" placeholder="Descreva a tarefa que surgiu"></div>
     <div class="form-grid">
@@ -7081,16 +7459,14 @@ function modalAdicionarTarefa(pId) {
       </div>
       <div style="font-size:11px;color:var(--gray-400)">Pode marcar mais de um.</div>
     </div>
-    <div class="form-group">
+    ${macros.length ? `<div class="form-group">
       <label class="form-label">Atividade macro <span style="font-weight:400;color:var(--gray-400)">(opcional)</span></label>
       <select class="form-input form-select" id="ntMacro">
         <option value="">— Sem vínculo com o cronograma —</option>
         ${macros.map(m=>`<option value="${m.id}">${m.name||'(sem nome)'}${m.phase?' — '+m.phase:''}${m.endDate?' · até '+fmt(m.endDate):''}</option>`).join('')}
       </select>
-      <div style="font-size:11px;color:var(--gray-400);margin-top:4px">
-        ${macros.length ? 'Ao vincular, a tarefa herda o prazo da atividade macro (se você não informar um prazo).' : 'Este projeto ainda não tem cronograma macro importado.'}
-      </div>
-    </div>
+      <div style="font-size:11px;color:var(--gray-400);margin-top:4px">Ao vincular, a tarefa herda o prazo da atividade macro (se você não informar um prazo).</div>
+    </div>` : ''}
     <div class="form-grid">
       <div class="form-group"><label class="form-label">Prazo <span style="font-weight:400;color:var(--gray-400)">(opcional)</span></label>
         <input type="date" class="form-input" id="ntPrazo"></div>
@@ -7135,6 +7511,25 @@ async function salvarNovaTarefa(pId) {
   const macro = macroId ? (p.macroActivities||[]).find(m => m.id === macroId) : null;
   let prazo = el('ntPrazo')?.value || null;
   let prazoOrigem = prazo ? 'manual' : null;
+  // Prazo além do fim da macro: avisa e pede confirmação (2º clique em "Confirmar e adicionar")
+  const limiteNova = macro ? (macro.endDate || macro.startDate || null) : null;
+  if (prazo && limiteNova && prazo > limiteNova) {
+    const chaveN = macroId + '|' + prazo;
+    if (_avisoNovaTarefa !== chaveN) {
+      _avisoNovaTarefa = chaveN;
+      const caixaN = el('ntAviso');
+      if (caixaN) {
+        caixaN.innerHTML = `<strong><i class="ti ti-alert-triangle" style="font-size:13px;vertical-align:-2px"></i> Prazo depois do fim da macro.</strong><br>
+          O prazo informado (<strong>${fmt(prazo)}</strong>) é depois do fim da macro "${(macro.name || '').replace(/</g,'&lt;')}" (<strong>${fmt(limiteNova)}</strong>).
+          Para manter essa data, clique em <strong>Confirmar e adicionar</strong>. Para ajustar, mude o prazo.`;
+        caixaN.style.display = 'block';
+      }
+      const btN = el('ntBtnSalvar');
+      if (btN) btN.innerHTML = '<i class="ti ti-alert-triangle"></i> Confirmar e adicionar';
+      return;
+    }
+  }
+  _avisoNovaTarefa = null;
   if (!prazo && macro && macro.endDate) { prazo = macro.endDate; prazoOrigem = 'macro'; }
 
   if (!Array.isArray(p.tasks)) p.tasks = [];
@@ -7161,6 +7556,11 @@ async function salvarNovaTarefa(pId) {
     if (btn) { btn.disabled = false; btn.innerHTML = lbl; }
     erro('Não foi possível adicionar: ' + res.error);
     return;
+  }
+  if (macro) {
+    vincularTarefaAMacro(p, nova, macro.id);   // a tarefa passa a acompanhar as datas da macro
+    const rv = await persistirCronograma(p, [nova]);
+    if (!rv.ok) notificar('A tarefa foi criada, mas o vínculo com a macro não foi gravado: ' + rv.error, 'erro');
   }
   saveState();
   if (btn) { btn.disabled = false; btn.innerHTML = lbl; }
@@ -7719,7 +8119,7 @@ function renderMinhasTarefasHierarquia(tabsHTML) {
     const nome = (m && m.name) || (d.mapping && d.mapping.macroNameSnapshot) || '(atividade não localizada)';
     const prog = d.progress, st = d.status;
     const periodo = (m && (m.startDate || m.endDate)) ? `${fmt(m.startDate)} a ${fmt(m.endDate)}` : 'sem datas';
-    const sorted = sortHierarchyTasks(d.tasks);
+    const sorted = sortHierarchyTasks(d.tasks, ordemDasTarefas(p));
     return `<div style="margin-bottom:7px;border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;background:#fff">
       <div onclick="mtToggleMacro('${pId}','${fase.replace(/'/g,"\\'")}','${String(dk).replace(/'/g,"\\'")}')"
            style="display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;user-select:none">
@@ -7747,7 +8147,7 @@ function renderMinhasTarefasHierarquia(tabsHTML) {
 
     // Corpo: com ou sem camada de macro entrega conforme o agrupamento escolhido
     let corpo;
-    if (state.mtAgrupar === 'proj-fase-macro' && projeto) {
+    if (state.mtAgrupar === 'proj-fase-macro' && projeto && projetoTemMacro(projeto)) {
       const g = groupProjectTasksHierarchy(projeto, tasks)[0];
       if (g) {
         const macros = g.macroDeliveries.map(d => mtMacroHTML(pId, projeto, fase, d)).join('');
@@ -7760,7 +8160,7 @@ function renderMinhasTarefasHierarquia(tabsHTML) {
               <div style="flex:1;font-size:12px;font-weight:600;color:#92400e">Sem macro entrega vinculada</div>
               <span class="badge badge-warn" style="font-size:9px">${g.unmappedTasks.length}</span>
             </div>
-            ${ab?`<div style="display:flex;flex-direction:column;gap:7px;padding:8px 10px 10px 20px">${sortHierarchyTasks(g.unmappedTasks).map(t=>tarefaCardHTML(t)).join('')}</div>`:''}
+            ${ab?`<div style="display:flex;flex-direction:column;gap:7px;padding:8px 10px 10px 20px">${sortHierarchyTasks(g.unmappedTasks, ordemDasTarefas(projeto)).map(t=>tarefaCardHTML(t)).join('')}</div>`:''}
           </div>`;
         })() : '';
         corpo = macros + unmapped;
@@ -8123,7 +8523,9 @@ function renderMyTasksDueTable(items) {
   const linhas = items.map(it => {
     const t = it.task;
     const dc = dueCategoryText(it);
-    const ctx = `${it.phase ? it.phase.split(' - ')[0] : 'Sem fase'} · ${it.macroDeliveryName || 'Sem macro entrega'}`;
+    const projIt = state.projetos.find(x => x.id === it.projectId);
+    const macroCtx = it.macroDeliveryName || (projetoTemMacro(projIt) ? 'Sem macro entrega' : '');
+    const ctx = `${it.phase ? it.phase.split(' - ')[0] : 'Sem fase'}${macroCtx ? ' · ' + macroCtx : ''}`;
     const cat = getTaskDueCategory(t);
     const dataBg = cat==='overdue' ? 'background:#fef2f2' : '';
     return `<tr style="${dataBg}">
@@ -8435,7 +8837,7 @@ function renderChecklists() {
           <div style="display:flex;gap:14px;font-size:11.5px;color:var(--gray-500);border-top:1px solid var(--gray-100);padding-top:9px">
             <span><strong style="color:var(--gray-700)">${tpl.tasks.length}</strong> tarefas</span>
             <span><strong style="color:var(--gray-700)">${nFases}</strong> fases</span>
-            <span><strong style="color:var(--gray-700)">${nMacros}</strong> macro atividades</span>
+            ${nMacros ? `<span><strong style="color:var(--gray-700)">${nMacros}</strong> macro atividades</span>` : `<span style="color:var(--gray-400)">sem cronograma macro</span>`}
           </div>
         </div>`;
       }).join('')}
@@ -8459,6 +8861,23 @@ function expandirTudoChecklist(tplId, abrir) {
 }
 
 // Detalhe: Fase → Macro atividade → Tarefa, cada nível expansível
+function _tabelaTarefasTemplate(tpl, tarefas) {
+  return `<table style="width:100%;table-layout:fixed">
+            <colgroup><col style="width:42%"><col style="width:13%"><col style="width:17%"><col style="width:10%"><col style="width:18%"></colgroup>
+            <thead><tr><th>Tarefa</th><th>Tema</th><th>Responsável</th><th>Esforço</th><th></th></tr></thead>
+            <tbody>${tarefas.map(t => `<tr>
+              <td style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(t.tarefa||'').replace(/"/g,'&quot;')}">${t.tarefa} ${helpIconHTML(t)}</td>
+              <td><span class="badge" style="background:${(TEMA_COLORS[t.tema]||'#64748b')}18;color:${TEMA_COLORS[t.tema]||'#64748b'}">${t.tema}</span></td>
+              <td style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.responsavel||'—'}</td>
+              <td style="font-size:12px">${t.esforco||'—'}</td>
+              <td style="white-space:nowrap"><div style="display:flex;gap:4px">
+                <button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" onclick="modalEditarTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-edit"></i> Editar</button>
+                <button class="btn btn-sm btn-excluir" style="font-size:11px" onclick="removerTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-trash"></i> Excluir</button>
+              </div></td>
+            </tr>`).join('')}</tbody>
+          </table>`;
+}
+
 function renderChecklistDetalhe(tpl) {
   document.getElementById('topbar-actions').innerHTML = `
     <button class="btn btn-secondary btn-sm" onclick="voltarChecklists()"><i class="ti ti-arrow-left"></i> Templates</button>
@@ -8471,6 +8890,8 @@ function renderChecklistDetalhe(tpl) {
   (tpl.deParaTemplate||[]).forEach(d => (d.checklistTaskIds||[]).forEach(c => { macroDaTarefa[c] = d; }));
   const fases = _ordenarFases([...new Set(tpl.tasks.map(t => t.fase).filter(Boolean))]);
 
+  // Template sem macro atividades (ex.: Customização): tarefas direto na fase
+  const semMacroTpl = !(tpl.deParaTemplate || []).length;
   const blocos = fases.map(fase => {
     const daFase = tpl.tasks.filter(t => t.fase === fase);
     const fc = FASE_COLORS[fase] || {bg:'var(--gray-100)',color:'var(--gray-600)'};
@@ -8483,7 +8904,9 @@ function renderChecklistDetalhe(tpl) {
       grupos[idx[chave]].tarefas.push(t);
     });
     const aberta = expF[fase] === true;
-    const corpo = !aberta ? '' : grupos.map(g => {
+    const corpo = !aberta ? '' : semMacroTpl
+      ? `<div style="border-top:1px solid var(--gray-100);padding:6px 14px 10px">${_tabelaTarefasTemplate(tpl, daFase)}</div>`
+      : grupos.map(g => {
       const abertaM = expM[g.chave] === true;
       return `<div style="border-top:1px solid var(--gray-100)">
         <div onclick="toggleClMacro('${g.chave.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:8px;padding:8px 14px 8px 30px;cursor:pointer;background:var(--gray-50)">
@@ -8492,20 +8915,7 @@ function renderChecklistDetalhe(tpl) {
           <span style="margin-left:auto;font-size:11px;color:var(--gray-400)">${g.tarefas.length} tarefa${g.tarefas.length!==1?'s':''}</span>
         </div>
         ${!abertaM ? '' : `<div style="padding:0 14px 10px 30px">
-          <table style="width:100%;table-layout:fixed">
-            <colgroup><col style="width:42%"><col style="width:13%"><col style="width:17%"><col style="width:10%"><col style="width:18%"></colgroup>
-            <thead><tr><th>Tarefa</th><th>Tema</th><th>Responsável</th><th>Esforço</th><th></th></tr></thead>
-            <tbody>${g.tarefas.map(t => `<tr>
-              <td style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(t.tarefa||'').replace(/"/g,'&quot;')}">${t.tarefa} ${helpIconHTML(t)}</td>
-              <td><span class="badge" style="background:${(TEMA_COLORS[t.tema]||'#64748b')}18;color:${TEMA_COLORS[t.tema]||'#64748b'}">${t.tema}</span></td>
-              <td style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.responsavel||'—'}</td>
-              <td style="font-size:12px">${t.esforco||'—'}</td>
-              <td style="white-space:nowrap"><div style="display:flex;gap:4px">
-                <button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px" onclick="modalEditarTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-edit"></i> Editar</button>
-                <button class="btn btn-sm btn-excluir" style="font-size:11px" onclick="removerTarefaChecklist('${tpl.id}','${t.id}')"><i class="ti ti-trash"></i> Excluir</button>
-              </div></td>
-            </tr>`).join('')}</tbody>
-          </table>
+          ${_tabelaTarefasTemplate(tpl, g.tarefas)}
         </div>`}
       </div>`;
     }).join('');
@@ -8514,7 +8924,7 @@ function renderChecklistDetalhe(tpl) {
       <div onclick="toggleClFase('${fase.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:9px;padding:11px 14px;cursor:pointer;background:${fc.bg}">
         <i class="ti ti-chevron-${aberta?'down':'right'}" style="font-size:15px;color:${fc.color}"></i>
         <span style="font-size:13px;font-weight:700;color:${fc.color}">${fase}</span>
-        <span style="margin-left:auto;font-size:11.5px;color:${fc.color};opacity:.8">${grupos.length} macro${grupos.length!==1?'s':''} · ${daFase.length} tarefa${daFase.length!==1?'s':''}</span>
+        <span style="margin-left:auto;font-size:11.5px;color:${fc.color};opacity:.8">${semMacroTpl ? '' : `${grupos.length} macro${grupos.length!==1?'s':''} · `}${daFase.length} tarefa${daFase.length!==1?'s':''}</span>
       </div>
       ${corpo}
     </div>`;
