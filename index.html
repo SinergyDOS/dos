@@ -744,7 +744,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-11-04-ordem-checklist-avisos-prazo';
+const DOS_BUILD = '2026-11-05-cronograma-macros-por-fase';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -2649,8 +2649,9 @@ function showProjectExecutiveSummary(projectId) {
   // macro entregas atrasadas (quando calculável)
   let macroAtrasadas = 0;
   try {
-    const grupos = groupProjectTasksHierarchy(p, p.tasks||[]);
-    grupos.forEach(g => g.macroDeliveries.forEach(d => { if (d.status.key === 'atrasada') macroAtrasadas++; }));
+    // conta cada macro UMA vez, pela situação da macro inteira (antes contava uma por fase em que ela tinha tarefas)
+    const resumos = resumoPorMacro(p, p.macroActivities || [], mapaMacroTarefas(p));
+    macroAtrasadas = Object.values(resumos).filter(r => r.status.key === 'atrasada').length;
   } catch(e) {}
   const top5 = sortProjectRisks(getProjectRisks(p)).slice(0,5);
 
@@ -3901,30 +3902,31 @@ function renderGanttCronograma(p, macros) {
   const pctHoje = (hoje >= intervalo.ini && hoje <= intervalo.fim) ? _ganttPct(hoje, intervalo) : null;
   const linhaHoje = pctHoje != null ? `<div style="position:absolute;top:0;bottom:0;left:${pctHoje}%;width:1px;background:var(--danger);z-index:2"></div>` : '';
 
-  // agrupa macros por fase, ordenadas pelo número da fase
-  const fases = _ordenarFases([...new Set(macros.map(m => m.phase || 'Sem fase'))]);
-
-  const grupos = groupProjectTasksHierarchy(p, p.tasks || []);
-  const statusPorMacro = {};
-  grupos.forEach(g => g.macroDeliveries.forEach(dd => {
-    if (dd.macroActivity) statusPorMacro[dd.macroActivity.id] = dd;
-  }));
+  // Cada macro aparece em todas as fases em que tem tarefas (como na Lista), ordenadas pelo número da fase
+  const tarefasPorMacro = mapaMacroTarefas(p);
+  const ordemTar = ordemDasTarefas(p);
+  const fasesDasTarefas = new Set((p.tasks || []).map(t => t.fase).filter(Boolean));
+  const fasesDaMacro = new Map(macros.map(m => [m.id, fasesParaListarMacro(p, m, tarefasPorMacro, fasesDasTarefas)]));
+  const fases = _ordenarFases([...new Set([...fasesDaMacro.values()].flat())]);
+  const statusPorMacro = resumoPorMacro(p, macros, tarefasPorMacro);   // progresso da macro INTEIRA
 
   const linhas = [];
   fases.forEach(fase => {
-    const doGrupo = macros.filter(m => (m.phase || 'Sem fase') === fase)
+    const doGrupo = macros.filter(m => fasesDaMacro.get(m.id).includes(fase))
       .sort((a,b) => {
         const da = a.startDate || a.endDate || '9999-12-31';
         const db = b.startDate || b.endDate || '9999-12-31';
         if (da !== db) return da < db ? -1 : 1;
-        return ((p.macroActivities||[]).indexOf(a) - (p.macroActivities||[]).indexOf(b)) || (a.name||'').localeCompare(b.name||'');
+        return (posMacroNaFase(p, a, fase, tarefasPorMacro, ordemTar) - posMacroNaFase(p, b, fase, tarefasPorMacro, ordemTar)) || (a.name||'').localeCompare(b.name||'');
       });
     const datas = [];
-    doGrupo.forEach(m => { const a=parseLocalDate(m.startDate), b=parseLocalDate(m.endDate); if(a)datas.push(a); if(b)datas.push(b); });
+    // a barra da fase usa só as macros cadastradas nela (as que continuam de outra fase têm datas fora desta fase)
+    doGrupo.filter(m => (m.phase || 'Sem fase') === fase).forEach(m => { const a=parseLocalDate(m.startDate), b=parseLocalDate(m.endDate); if(a)datas.push(a); if(b)datas.push(b); });
     const fc = FASE_COLORS[fase] || {bg:'#f1f5f9',color:'#475569'};
-    // progresso da fase = microtarefas das macros dela
+    // progresso da fase = tarefas DESTA fase que pertencem às macros listadas (macro importada com outro nome de fase usa todas)
+    const restringe = fasesDasTarefas.has(fase);
     let tot=0, conc=0;
-    doGrupo.forEach(m => { const dd=statusPorMacro[m.id]; if(dd){ tot+=dd.progress.totalTasks; conc+=dd.progress.completedTasks; } });
+    doGrupo.forEach(m => (tarefasPorMacro.get(m.id) || []).forEach(t => { if (restringe && t.fase !== fase) return; tot++; if (t.status === 'concluida') conc++; }));
     const pctFase = tot ? Math.round(conc/tot*100) : 0;
     const barraFase = datas.length >= 2
       ? _ganttBarra(new Date(Math.min(...datas.map(d=>d.getTime()))), new Date(Math.max(...datas.map(d=>d.getTime()))), intervalo, fc.color, fc.bg, pctFase)
@@ -3949,11 +3951,14 @@ function renderGanttCronograma(p, macros) {
       else if (b) barra = `<div style="position:absolute;top:9px;left:${_ganttPct(b,intervalo)}%;width:11px;height:11px;transform:translateX(-50%) rotate(45deg);background:${corBarra};border-radius:1px"></div>`;
       const semData = !a && !b;
       const nTar = dd ? dd.progress.totalTasks : 0;
+      const continuacao = (m.phase || 'Sem fase') !== fase;
+      const nTarFase = continuacao ? (tarefasPorMacro.get(m.id) || []).filter(t => t.fase === fase).length : 0;
       linhas.push(`<div class="gt-row">
         <div class="gt-lf" style="padding-left:26px">
           <span class="gt-nm">${m.name || '—'}</span>
+          ${continuacao ? `<span class="badge badge-gray" style="font-size:9px" title="Esta macro foi cadastrada em ${(m.phase||'').replace(/"/g,'&quot;')} e tem ${nTarFase} tarefa(s) também nesta fase">${rotuloComecaNaFase(m)}</span>` : ''}
           ${semData ? '<span class="badge badge-gray" style="font-size:9px">sem data</span>' : ''}
-          <span class="gt-dt">${nTar} tar. · ${pct}%</span>
+          <span class="gt-dt">${continuacao ? nTarFase + ' de ' + nTar : nTar} tar. · ${pct}%</span>
         </div>
         <div class="gt-tl">${barra}${linhaHoje}</div>
       </div>`);
@@ -4536,6 +4541,62 @@ function sincronizarVinculosMacro(p) {
   });
   return corrigidos;
 }
+
+// ==================== MACROS QUE PASSAM POR MAIS DE UMA FASE ====================
+// Uma macro tem UMA data de início e de fim, mas as tarefas dela podem estar em fases diferentes do checklist
+// (ex.: "Treinamento Contábil" tem tarefas na Fase 3 e na Fase 5). A Lista mostra a macro em cada fase em que
+// ela tem tarefas; o Cronograma passa a fazer o mesmo, em vez de listá-la só na fase em que foi cadastrada.
+
+// macroId → todas as tarefas da macro (de todas as fases)
+function mapaMacroTarefas(p) {
+  const out = new Map();
+  (p.tasks || []).forEach(t => {
+    const d = resolveTaskMacroDelivery(p, t);
+    const id = d.hasDelivery ? ((d._macro && d._macro.id) || d.macroActivityId) : null;
+    if (!id) return;
+    if (!out.has(id)) out.set(id, []);
+    out.get(id).push(t);
+  });
+  return out;
+}
+
+// Fases em que a macro deve aparecer no Cronograma: a fase cadastrada primeiro, depois as demais fases com tarefas dela.
+// Só amplia quando a fase cadastrada é uma fase real do checklist deste projeto: macros importadas do Planner usam
+// outros nomes de fase, e nelas o agrupamento continua o do cronograma importado.
+function fasesParaListarMacro(p, m, tarefasPorMacro, fasesDasTarefas) {
+  const primeira = m.phase || 'Sem fase';
+  const fases = [primeira];
+  if (fasesDasTarefas.has(primeira)) {
+    (tarefasPorMacro.get(m.id) || []).forEach(t => { if (t.fase && !fases.includes(t.fase)) fases.push(t.fase); });
+  }
+  return fases;
+}
+
+// Progresso e situação da macro INTEIRA (todas as fases). Antes se usava a entrega de uma fase só, e para macro que
+// passa por duas fases a última sobrescrevia a primeira: a contagem e o percentual saíam de uma fase apenas.
+function resumoPorMacro(p, macros, tarefasPorMacro) {
+  const out = {};
+  macros.forEach(m => {
+    const tarefas = tarefasPorMacro.get(m.id) || [];
+    if (!tarefas.length) return;   // sem tarefas: sem resumo, como antes
+    const mp = (p.macroMappings || []).find(x => x.macroActivityId === m.id);
+    const prog = calculateMacroDeliveryProgress(p, m, tarefas);
+    out[m.id] = { macroActivity: m, mapping: mp, status: determineMacroDeliveryStatus(m, mp, prog), progress: prog };
+  });
+  return out;
+}
+// Posição da macro DENTRO de uma fase na sequência do checklist (a 1ª tarefa dela nessa fase). É o mesmo critério
+// de desempate da Lista, para que as duas telas ordenem igual; sem tarefas na fase, cai para a ordem cadastrada.
+function posMacroNaFase(p, m, fase, tarefasPorMacro, ordem) {
+  let min = null;
+  (tarefasPorMacro.get(m.id) || []).forEach(t => {
+    if (t.fase !== fase) return;
+    const i = ordem.get(t.id);
+    if (i != null && (min == null || i < min)) min = i;
+  });
+  return min != null ? min : 1e6 + (p.macroActivities || []).indexOf(m);
+}
+function rotuloComecaNaFase(m) { return 'começa na ' + String(m.phase || '').split(' - ')[0]; }
 
 // ==================== PRAZOS DAS TAREFAS EM LOTE (aba Lista) ====================
 // "Editar prazos" libera o prazo de todas as tarefas de uma vez e salva tudo junto. Quando a tarefa
@@ -5303,36 +5364,42 @@ function renderCronogramaMacro(p) {
   });
 
   // Tabela agrupada por fase (na ordem correta) e, dentro dela, por data de início.
-  const fasesTab = _ordenarFases([...new Set(macros.map(m => m.phase || 'Sem fase'))]);
+  // Cada macro aparece em todas as fases em que tem tarefas (como na Lista). Nas fases em que ela "continua", a
+  // linha mostra as datas dela só para leitura: a edição de datas fica na linha da fase em que foi cadastrada.
+  const tarefasPorMacro = mapaMacroTarefas(p);
+  const ordemTar = ordemDasTarefas(p);
+  const fasesDasTarefas = new Set((p.tasks || []).map(t => t.fase).filter(Boolean));
+  const fasesDaMacro = new Map(macros.map(m => [m.id, fasesParaListarMacro(p, m, tarefasPorMacro, fasesDasTarefas)]));
+  const fasesTab = _ordenarFases([...new Set([...fasesDaMacro.values()].flat())]);
   const macrosOrdenadas = [];
   fasesTab.forEach(fase => {
     macrosOrdenadas.push({ _cabecalhoFase: fase });
-    macros.filter(m => (m.phase || 'Sem fase') === fase)
+    macros.filter(m => fasesDaMacro.get(m.id).includes(fase))
       .sort((a,b) => {
         const da = a.startDate || a.endDate || '9999-12-31';
         const db = b.startDate || b.endDate || '9999-12-31';
         if (da !== db) return da < db ? -1 : 1;
-        return ((p.macroActivities||[]).indexOf(a) - (p.macroActivities||[]).indexOf(b)) || (a.name||'').localeCompare(b.name||'');
+        return (posMacroNaFase(p, a, fase, tarefasPorMacro, ordemTar) - posMacroNaFase(p, b, fase, tarefasPorMacro, ordemTar)) || (a.name||'').localeCompare(b.name||'');
       })
-      .forEach(m => macrosOrdenadas.push(m));
+      .forEach(m => macrosOrdenadas.push((m.phase || 'Sem fase') === fase ? m : { _continuacao: true, m, fase }));
   });
 
   // Progresso e situação vêm das microtarefas (mesma fonte do Gantt).
   // O campo m.progress é o valor congelado da importação e não acompanha as baixas.
-  const statusPorMacro = {};
-  try {
-    groupProjectTasksHierarchy(p, p.tasks || []).forEach(g =>
-      g.macroDeliveries.forEach(dd => { if (dd.macroActivity) statusPorMacro[dd.macroActivity.id] = dd; }));
-  } catch (e) { console.warn('progresso macro:', e); }
+  const statusPorMacro = resumoPorMacro(p, macros, tarefasPorMacro);   // progresso da macro INTEIRA (todas as fases)
 
-  const linhas = macrosOrdenadas.map(m => {
-    if (m._cabecalhoFase) {
-      const fc = FASE_COLORS[m._cabecalhoFase] || {bg:'var(--gray-100)',color:'var(--gray-600)'};
-      return `<tr><td colspan="7" style="background:${fc.bg};color:${fc.color};font-weight:700;font-size:12px;padding:6px 10px">${m._cabecalhoFase}</td></tr>`;
+  const linhas = macrosOrdenadas.map(item => {
+    if (item._cabecalhoFase) {
+      const fc = FASE_COLORS[item._cabecalhoFase] || {bg:'var(--gray-100)',color:'var(--gray-600)'};
+      return `<tr><td colspan="7" style="background:${fc.bg};color:${fc.color};font-weight:700;font-size:12px;padding:6px 10px">${item._cabecalhoFase}</td></tr>`;
     }
-    const nVinc = vinculadasPorMacro[m.id] || 0;
+    const continuacao = !!item._continuacao;
+    const m = continuacao ? item.m : item;
+    const nVinc = continuacao
+      ? (tarefasPorMacro.get(m.id) || []).filter(t => t.fase === item.fase).length
+      : (vinculadasPorMacro[m.id] || 0);
     const vincBadge = nVinc > 0
-      ? `<span class="badge badge-green" style="font-size:10px"><i class="ti ti-link"></i>${nVinc} tarefa${nVinc>1?'s':''}</span>`
+      ? `<span class="badge badge-green" style="font-size:10px"><i class="ti ti-link"></i>${nVinc} tarefa${nVinc>1?'s':''}${continuacao ? ' nesta fase' : ''}</span>`
       : `<span class="badge badge-gray" style="font-size:10px"><i class="ti ti-unlink"></i>Sem vínculo</span>`;
     const dd = statusPorMacro[m.id];
     const prog = dd && dd.progress && dd.progress.microProgress != null
@@ -5342,14 +5409,15 @@ function renderCronogramaMacro(p) {
     const totalT = dd ? dd.progress.totalTasks : null;
     const atrasada = dd && dd.status.key === 'atrasada';
     const naoEncontrada = m.importStatus === 'not-found';
-    return `<tr data-macro-row="${m.id}" style="${naoEncontrada?'background:#fef2f2':''}">
+    return `<tr ${continuacao ? '' : `data-macro-row="${m.id}"`} style="${naoEncontrada?'background:#fef2f2':''}">
       <td style="font-weight:500;color:var(--gray-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(m.name||'').replace(/"/g,'&quot;')}">${m.name || '—'}
+        ${continuacao ? `<span class="badge badge-gray" style="font-size:9px;margin-left:4px" title="Esta macro foi cadastrada em ${(m.phase||'').replace(/"/g,'&quot;')} e tem tarefas também nesta fase">${rotuloComecaNaFase(m)}</span>` : ''}
         ${naoEncontrada ? `<span class="badge badge-red" style="font-size:9px;margin-left:4px" title="Não encontrada na última importação"><i class="ti ti-alert-triangle"></i>não encontrada</span>` : ''}
       </td>
-      <td style="font-size:12px;color:${m.startDate?'var(--gray-600)':'var(--gray-300)'}">${state.cronoEdicao
+      <td style="font-size:12px;color:${m.startDate?'var(--gray-600)':'var(--gray-300)'}">${(state.cronoEdicao && !continuacao)
         ? `<input type="date" class="form-input" style="padding:3px 6px;font-size:12px" id="ed-ini-${m.id}" value="${m.startDate||''}">`
         : (m.startDate?fmt(m.startDate):'—')}</td>
-      <td style="font-size:12px;color:${m.endDate?'var(--gray-600)':'var(--gray-300)'}">${state.cronoEdicao
+      <td style="font-size:12px;color:${m.endDate?'var(--gray-600)':'var(--gray-300)'}">${(state.cronoEdicao && !continuacao)
         ? `<input type="date" class="form-input" style="padding:3px 6px;font-size:12px" id="ed-fim-${m.id}" value="${m.endDate||''}">`
         : (m.endDate?fmt(m.endDate):'—')}</td>
       <td>
