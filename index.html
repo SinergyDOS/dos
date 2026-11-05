@@ -744,7 +744,7 @@ const DEFAULT_DEPARA_TEMPLATE_RH = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-11-05-cronograma-macros-por-fase';
+const DOS_BUILD = '2026-11-05-filtro-analista-projetos';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -2133,7 +2133,7 @@ function normalizeExecutiveFilters() {
     state.executiveFilters = {};
   }
   const f = state.executiveFilters;
-  ['search','module','goLivePeriod','currentPhase','projectStatus','consultant','analyst','riskFilter','blockerFilter'].forEach(k => {
+  ['search','module','goLivePeriod','currentPhase','projectStatus','consultant','analyst','analistaProjetos','riskFilter','blockerFilter'].forEach(k => {
     if (typeof f[k] !== 'string') f[k] = '';
   });
   // Com o portfólio crescendo, a leitura útil é o que está em andamento.
@@ -2191,6 +2191,9 @@ function getFilteredExecutiveProjects() {
     }
     if (f.consultant && !pessoaEstaEm(p.consultor, f.consultant)) return false;
     if (f.analyst && !pessoaEstaEm(p.analista, f.analyst)) return false;
+    // Analista de projetos: quem acompanha o projeto na gestão. Projeto com mais de um aparece no filtro de cada um.
+    if (f.analistaProjetos === '__sem__') { if (listaPessoas(p.analistaProjetos).length) return false; }
+    else if (f.analistaProjetos && !pessoaEstaEm(p.analistaProjetos, f.analistaProjetos)) return false;
     if (f.riskFilter) {
       const rs = calculateProjectRiskSummary(p);
       if (f.riskFilter === 'com-abertos' && rs.open + rs.monitoring === 0) return false;
@@ -2453,6 +2456,16 @@ function renderExecutiveFilters() {
   const f = state.executiveFilters;
   const consultores = [...new Set((state.projetos||[]).flatMap(p=>listaPessoas(p.consultor)))].sort((a,b)=>a.localeCompare(b));
   const analistas = [...new Set((state.projetos||[]).flatMap(p=>listaPessoas(p.analista)))].sort((a,b)=>a.localeCompare(b));
+  // Analistas de projetos: sem repetir o mesmo nome escrito de formas diferentes; a própria pessoa vem primeiro, marcada "(eu)"
+  const euAP = normalizePersonName(state.currentUser?.name || '');
+  const vistosAP = new Set();
+  const analistasProjetos = (state.projetos||[]).flatMap(p => listaPessoas(p.analistaProjetos))
+    .filter(n => { const k = normalizePersonName(n); if (vistosAP.has(k)) return false; vistosAP.add(k); return true; })
+    .sort((a,b) => {
+      const ea = normalizePersonName(a) === euAP, eb = normalizePersonName(b) === euAP;
+      if (ea !== eb) return ea ? -1 : 1;
+      return a.localeCompare(b);
+    });
   const fases = Object.keys(FASE_COLORS);
   const temFiltro = Object.values(f).some(v => v);
 
@@ -2474,6 +2487,7 @@ function renderExecutiveFilters() {
       <select class="filter-select" onchange="execSetFilter('projectStatus',this.value)">${statusOpts.map(([k,l])=>`<option value="${k}" ${f.projectStatus===k?'selected':''}>${l}</option>`).join('')}</select>
       <select class="filter-select" onchange="execSetFilter('consultant',this.value)"><option value="">Todo consultor</option>${consultores.map(c=>`<option value="${c}" ${f.consultant===c?'selected':''}>${c}</option>`).join('')}</select>
       <select class="filter-select" onchange="execSetFilter('analyst',this.value)"><option value="">Todo analista</option>${analistas.map(a=>`<option value="${a}" ${f.analyst===a?'selected':''}>${a}</option>`).join('')}</select>
+      <select class="filter-select" onchange="execSetFilter('analistaProjetos',this.value)" title="Ver só os projetos acompanhados por um analista de projetos"><option value="">Todo analista de projetos</option>${analistasProjetos.map(a=>`<option value="${a.replace(/"/g,'&quot;')}" ${(f.analistaProjetos && f.analistaProjetos!=='__sem__' && normalizePersonName(f.analistaProjetos)===normalizePersonName(a))?'selected':''}>${a}${normalizePersonName(a)===euAP?' (eu)':''}</option>`).join('')}<option value="__sem__" ${f.analistaProjetos==='__sem__'?'selected':''}>Sem analista de projetos</option></select>
       <select class="filter-select" onchange="execSetFilter('riskFilter',this.value)">${riskOpts.map(([k,l])=>`<option value="${k}" ${f.riskFilter===k?'selected':''}>${l}</option>`).join('')}</select>
       <select class="filter-select" onchange="execSetFilter('blockerFilter',this.value)">${blockerOpts.map(([k,l])=>`<option value="${k}" ${f.blockerFilter===k?'selected':''}>${l}</option>`).join('')}</select>
       ${temFiltro ? `<button class="btn btn-ghost btn-sm" onclick="clearExecutiveFilters()"><i class="ti ti-x"></i> Limpar filtros</button>` : ''}
