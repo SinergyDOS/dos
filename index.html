@@ -263,6 +263,21 @@ tr:last-child td{border-bottom:none}
 
 .hidden{display:none!important}
 .divider{border:none;border-top:1px solid var(--gray-200);margin:16px 0}
+/* Inclusão rápida e movimentação de tarefas na Lista (estilo Planner) */
+.tk-c1{position:relative;padding-left:18px!important}
+.tk-alca{position:absolute;left:3px;top:50%;transform:translateY(-50%);cursor:grab;color:var(--gray-400);font-size:14px;line-height:1;user-select:none;visibility:hidden}
+tr:hover>td>.tk-alca{visibility:visible}
+.tk-ins{position:absolute;left:0;width:46px;height:12px;z-index:3;cursor:pointer;display:none}
+.tk-ins-topo{top:-6px} .tk-ins-base{bottom:-6px;display:block}
+tbody>tr:first-child .tk-ins-topo{display:block}
+.tk-ins::before{content:'';position:absolute;left:0;width:3000px;top:5px;height:2px;background:var(--accent);opacity:0;pointer-events:none}
+.tk-ins:hover::before{opacity:1}
+.tk-ins-btn{position:absolute;left:2px;top:-3px;background:var(--accent);color:#fff;font-size:10.5px;font-weight:600;line-height:16px;border-radius:9px;padding:0 8px;opacity:0;white-space:nowrap;pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.tk-ins:hover .tk-ins-btn{opacity:1}
+tr.tk-alvo-antes>td{box-shadow:inset 0 3px 0 var(--accent)}
+tr.tk-alvo-depois>td{box-shadow:inset 0 -3px 0 var(--accent)}
+tr.tk-arrastando{opacity:.35}
+tr.tk-nova-linha>td{background:#eff6ff;vertical-align:top}
 </style>
 </head>
 <body>
@@ -1014,7 +1029,7 @@ const DEFAULT_DEPARA_RH_AD = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-11-28-ordenar-por-customizacao';
+const DOS_BUILD = '2026-11-28-incluir-mover-tarefas';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -1882,7 +1897,7 @@ function _sincRedesenhar() {
   const modal = document.getElementById('modal-overlay');
   const a = document.activeElement;
   const digitando = !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(a.type))) && !!a.closest && !!a.closest('#page-content');
-  if ((modal && !modal.classList.contains('hidden')) || state.listaEdicaoPrazos || state.cronoEdicao || digitando) { _sinc.pendenteRender = true; return false; }
+  if ((modal && !modal.classList.contains('hidden')) || state.listaEdicaoPrazos || state.cronoEdicao || digitando || (typeof tkOcupado === 'function' && tkOcupado())) { _sinc.pendenteRender = true; return false; }
   _sinc.pendenteRender = false;
   const rolagem = []; let n = document.getElementById('page-content');
   while (n) { if (n.scrollTop > 0) rolagem.push([n, n.scrollTop]); n = n.parentElement; }
@@ -7911,8 +7926,8 @@ function renderHierarchicalTaskRow(p, t) {
       ${lim ? `<span style="font-size:10.5px;color:var(--gray-400)">até ${fmt(lim)} (fim da macro)</span>` : ''}
     </div>`;
   }
-  return `<tr ${vencida?'style="background:#fef2f2"':''}>
-    <td><input type="checkbox" class="task-check" ${t.status==='concluida'?'checked':''} onchange="toggleTask('${p.id}','${t.id}',this.checked)"></td>
+  return `<tr data-tk-linha="${t.id}" ${tkAttrsLinha(p, t)} ${vencida?'style="background:#fef2f2"':''}>
+    <td class="${tkPodeEditar() ? 'tk-c1' : ''}">${tkMarcasLinha(p, t)}<input type="checkbox" class="task-check" ${t.status==='concluida'?'checked':''} onchange="toggleTask('${p.id}','${t.id}',this.checked)"></td>
     <td style="max-width:340px;cursor:pointer;color:var(--gray-800);font-weight:500;${t.status==='concluida'?'text-decoration:line-through;color:var(--gray-400)':''}" onclick="abrirTarefa('${p.id}','${t.id}')">
       <span class="badge" style="background:${(TEMA_COLORS[t.tema]||'#64748b')}18;color:${TEMA_COLORS[t.tema]||'#64748b'};font-size:9px;margin-right:6px">${t.tema}</span>${t.tarefa} ${helpIconHTML(t)}
     </td>
@@ -7929,6 +7944,253 @@ function renderHierarchicalTaskRow(p, t) {
       </div>
     </td>
   </tr>`;
+}
+
+// ==================== INCLUSÃO RÁPIDA E MOVIMENTAÇÃO DE TAREFAS (Lista do projeto) ====================
+// Como no Planner: ao passar o mouse na borda entre duas tarefas aparece "+ Inserir tarefa". O clique abre uma linha
+// com nome, responsável, prazo e esforço editáveis; fase, macro e tema vêm da tarefa vizinha. Enter salva e abre outra
+// linha logo abaixo; Esc cancela. A alça "⠿" arrasta a tarefa para outra posição dentro da MESMA fase (pode trocar de
+// macro, nunca de fase: a cadeia micro → macro → fase não pode divergir). Só o gestor inclui e move tarefas.
+let _tkNova = null;        // { pId, ancoraId, pos: 'antes'|'depois', salvando, aviso }
+let _tkArraste = null;     // { pId, tId }
+
+function tkPodeEditar() { return isGestor() && !state.listaEdicaoPrazos; }
+// Arrastar só faz sentido quando a Lista mostra a ordem manual (padrão + cronograma com datas)
+function tkPodeArrastar(p) { return tkPodeEditar() && (state.ordenacaoLista || 'padrao') === 'padrao' && projetoTemCronogramaDatado(p); }
+// Enquanto alguém digita a tarefa nova ou arrasta, a atualização automática não redesenha a tela
+function tkOcupado() { return !!_tkArraste || !!(_tkNova && (document.getElementById('tkNovaNome')?.value || '').trim()); }
+
+function tkEsc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+
+// Marcações da 1ª célula da linha (alça de arraste + zonas de inserção). Vazio para quem não é gestor.
+function tkMarcasLinha(p, t) {
+  if (!tkPodeEditar()) return '';
+  const a = `'${p.id}','${t.id}'`;
+  const alca = tkPodeArrastar(p)
+    ? `<span class="tk-alca" draggable="true" title="Arrastar para mover a tarefa (dentro da mesma fase)" ondragstart="tkArrasteInicio(event,${a})" ondragend="tkArrasteFim()">⠿</span>`
+    : '';
+  return `${alca}<div class="tk-ins tk-ins-topo" onclick="event.stopPropagation();tkInserir(${a},'antes')" title="Inserir tarefa aqui"><span class="tk-ins-btn">+ Inserir tarefa</span></div>`
+       + `<div class="tk-ins tk-ins-base" onclick="event.stopPropagation();tkInserir(${a},'depois')" title="Inserir tarefa aqui"><span class="tk-ins-btn">+ Inserir tarefa</span></div>`;
+}
+// Atributos de arraste da linha (alvo do soltar)
+function tkAttrsLinha(p, t) {
+  if (!tkPodeArrastar(p)) return '';
+  return `data-tk="${t.id}" ondragover="tkArrasteSobre(event,'${p.id}','${t.id}')" ondragleave="tkArrasteSai(event)" ondrop="tkSoltar(event,'${p.id}','${t.id}')"`;
+}
+
+// Macro que a tarefa usa na tela (mesma resolução da Lista), desde que sirva à fase dela
+function tkMacroDa(p, t) {
+  const d = resolveTaskMacroDelivery(p, t);
+  const m = d && d.hasDelivery ? (d._macro || (p.macroActivities || []).find(x => x.id === d.macroActivityId)) : null;
+  return (m && m.id && macroServeFase(p, m, t.fase)) ? m : null;
+}
+
+function tkInserir(pId, ancoraId, pos) {
+  if (!tkPodeEditar()) { notificar('Apenas o gestor de projetos pode incluir tarefas.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === pId);
+  const anc = p?.tasks?.find(x => x.id === ancoraId);
+  if (!p || !anc) return;
+  tkCancelarNova();
+  const tr = document.querySelector(`tr[data-tk-linha="${ancoraId}"]`);
+  if (!tr) return;
+  _tkNova = { pId, ancoraId, pos, salvando: false, aviso: null };
+  const macro = tkMacroDa(p, anc);
+  const lim = macro ? (macro.endDate || macro.startDate || null) : null;
+  const prazo = (macro && macro.endDate) ? macro.endDate : (anc.prazo || '');
+  const resp = String(anc.responsavel || 'Consultor').split(';').map(s => s.trim());
+  const origem = macro ? `fase e macro "${tkEsc(macro.name)}"` : `fase "${tkEsc(anc.fase)}"`;
+  tr.insertAdjacentHTML(pos === 'antes' ? 'beforebegin' : 'afterend', `<tr class="tk-nova-linha" id="tkNovaLinha">
+    <td></td>
+    <td><input class="form-input" id="tkNovaNome" placeholder="Nome da nova tarefa" style="padding:6px 8px;font-size:13px;width:100%" onkeydown="tkTecla(event)">
+      <div style="font-size:10.5px;color:var(--gray-500);margin-top:4px">Vai para a ${origem}, tema ${tkEsc(anc.tema || '—')}. <strong>Enter</strong> salva e abre outra linha · <strong>Esc</strong> cancela</div>
+      <div id="tkNovaAviso" style="display:none;font-size:11px;color:#92400e;background:#fffbeb;border:1px solid #fed7aa;border-radius:6px;padding:5px 8px;margin-top:5px"></div></td>
+    <td><div style="display:flex;flex-direction:column;gap:2px">${['Consultor','Analista','Cliente'].map(r => `
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--gray-700);cursor:pointer;white-space:nowrap">
+        <input type="checkbox" name="tkNovaResp" value="${r}" ${resp.includes(r) ? 'checked' : ''}> ${r}</label>`).join('')}</div></td>
+    <td><span class="badge badge-gray" style="font-size:10px">Pendente</span></td>
+    <td><input type="date" class="form-input" id="tkNovaPrazo" value="${prazo}" ${lim ? `max="${lim}"` : ''} style="padding:4px 6px;font-size:12px;width:140px" onkeydown="tkTecla(event)">
+      ${lim ? `<div style="font-size:10.5px;color:var(--gray-400)">até ${fmt(lim)} (fim da macro)</div>` : ''}</td>
+    <td><input class="form-input" id="tkNovaEsforco" placeholder="Ex: 4 horas" style="padding:4px 6px;font-size:12px;width:90px" onkeydown="tkTecla(event)"></td>
+    <td><div style="display:flex;gap:4px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" id="tkNovaSalvar" onclick="tkSalvarNova(false)"><i class="ti ti-check"></i> Salvar</button>
+      <button class="btn btn-secondary btn-sm" onclick="tkCancelarNova()">Cancelar</button></div></td>
+  </tr>`);
+  document.getElementById('tkNovaNome')?.focus();
+}
+
+function tkTecla(ev) {
+  if (ev.key === 'Enter') { ev.preventDefault(); tkSalvarNova(true); }
+  else if (ev.key === 'Escape') { ev.preventDefault(); tkCancelarNova(); }
+}
+function tkCancelarNova() {
+  document.getElementById('tkNovaLinha')?.remove();
+  _tkNova = null;
+}
+
+// Redesenha a Lista sem voltar ao topo (mesma técnica de redesenharAposStatus)
+function tkRedesenhar(p) {
+  const rolagem = []; let n = document.getElementById('page-content');
+  while (n) { if (n.scrollTop > 0) rolagem.push([n, n.scrollTop]); n = n.parentElement; }
+  const y = window.scrollY || 0;
+  renderProjetoDetail(p);
+  renderSidebar();
+  rolagem.forEach(([el, topo]) => { el.scrollTop = topo; });
+  if (y) window.scrollTo(0, y);
+}
+
+// Recalcula t._ordem = posição no array a partir de "desde"; devolve as tarefas cuja ordem mudou
+function tkRenumerar(p, desde, ignorar) {
+  const mudou = [];
+  for (let i = Math.max(0, desde); i < p.tasks.length; i++) {
+    const t = p.tasks[i];
+    if (t._ordem !== i) { t._ordem = i; if (t !== ignorar) mudou.push(t); }
+  }
+  return mudou;
+}
+// Grava SÓ a coluna ordem (não sobrescreve status/prazo que outra pessoa possa ter mudado), conferindo cada linha
+async function tkGravarOrdem(p, tarefas) {
+  if (!tarefas.length) return { ok: true };
+  if (!sbClient) return { ok: false, error: 'Sem conexão com o servidor.' };
+  let falhas = 0, ultimoErro = '';
+  for (let i = 0; i < tarefas.length; i += 8) {
+    const lote = tarefas.slice(i, i + 8);
+    const res = await Promise.all(lote.map(t =>
+      sbClient.from('tasks').update({ ordem: t._ordem }).eq('id', t.id).select('id')
+        .then(r => r, e => ({ error: { message: (e && e.message) || 'falha de conexão' } }))));
+    res.forEach(r => { if (r.error || !r.data || !r.data.length) { falhas++; ultimoErro = r.error ? r.error.message : 'sem permissão'; } });
+  }
+  return falhas ? { ok: false, error: `${falhas} tarefa(s) sem a nova posição gravada (${ultimoErro}).` } : { ok: true };
+}
+
+async function tkSalvarNova(continuar) {
+  if (!_tkNova || _tkNova.salvando) return;
+  if (!tkPodeEditar()) { notificar('Apenas o gestor de projetos pode incluir tarefas.', 'erro'); return; }
+  const p = state.projetos.find(x => x.id === _tkNova.pId);
+  const anc = p?.tasks?.find(x => x.id === _tkNova.ancoraId);
+  if (!p || !anc) { tkCancelarNova(); return; }
+  const el = id => document.getElementById(id);
+  const aviso = msg => { const a = el('tkNovaAviso'); if (a) { a.innerHTML = msg; a.style.display = 'block'; } };
+  const nome = (el('tkNovaNome')?.value || '').trim();
+  if (!nome) { aviso('Digite o nome da tarefa.'); el('tkNovaNome')?.focus(); return; }
+  const resp = [...document.querySelectorAll('input[name="tkNovaResp"]:checked')].map(c => c.value);
+  if (!resp.length) { aviso('Marque ao menos um responsável.'); return; }
+  const macro = tkMacroDa(p, anc);
+  const lim = macro ? (macro.endDate || macro.startDate || null) : null;
+  const prazo = el('tkNovaPrazo')?.value || null;
+  // Prazo depois do fim da macro: avisa e pede um segundo Salvar (mesma regra do formulário "Nova tarefa")
+  if (prazo && lim && prazo > lim && _tkNova.aviso !== prazo) {
+    _tkNova.aviso = prazo;
+    aviso(`O prazo (<strong>${fmt(prazo)}</strong>) é depois do fim da macro (<strong>${fmt(lim)}</strong>). Para manter, clique em <strong>Salvar</strong> de novo; para ajustar, mude o prazo.`);
+    return;
+  }
+  const doMacro = !!(macro && macro.endDate && prazo === macro.endDate);
+  const nova = {
+    id: uid(), tarefa: nome, fase: anc.fase, tema: anc.tema, responsavel: resp.join(';'),
+    esforco: (el('tkNovaEsforco')?.value || '').trim(), status: 'pendente',
+    prazo, prazoOrigem: prazo ? (doMacro ? 'macro' : 'manual') : null, _prazoManual: !!prazo && !doMacro,
+    help: '', comentario: '', templateTaskId: null, macroActivityId: macro ? macro.id : null,
+    concluidaEm: null, _goLiveMarker: false, bloqueioCom: '', bloqueioDesde: null, bloqueioObs: ''
+  };
+  _tkNova.salvando = true;
+  const bt = el('tkNovaSalvar'); if (bt) { bt.disabled = true; bt.innerHTML = '<i class="ti ti-loader-2"></i> Salvando...'; }
+
+  const copia = p.tasks.slice(), ordensAntes = p.tasks.map(t => t._ordem);
+  const idx = p.tasks.indexOf(anc) + (_tkNova.pos === 'antes' ? 0 : 1);
+  p.tasks.splice(idx, 0, nova);
+  const mudadas = tkRenumerar(p, idx, nova);
+  const r = await inserirTarefaSupabase(p, nova);
+  if (!r.ok) {
+    p.tasks = copia; copia.forEach((t, i) => { t._ordem = ordensAntes[i]; });
+    _tkNova.salvando = false;
+    if (bt) { bt.disabled = false; bt.innerHTML = '<i class="ti ti-check"></i> Salvar'; }
+    aviso('Não foi possível incluir: ' + tkEsc(r.error));
+    return;
+  }
+  const ro = await tkGravarOrdem(p, mudadas);
+  if (!ro.ok) notificar('A tarefa foi incluída, mas a posição pode mudar ao recarregar: ' + ro.error, 'erro');
+  if (macro) {
+    vincularTarefaAMacro(p, nova, macro.id);   // grava o vínculo nos dois lugares (tarefa e macroMappings)
+    const rv = await persistirCronograma(p, [nova]);
+    if (!rv.ok) notificar('A tarefa foi incluída, mas o vínculo com a macro não foi gravado: ' + rv.error, 'erro');
+  }
+  saveState();
+  _tkNova = null;
+  tkRedesenhar(p);
+  notificar('Tarefa incluída.', 'sucesso');
+  if (continuar) tkInserir(p.id, nova.id, 'depois');
+}
+
+// ── Arrastar e soltar ──
+function tkArrasteInicio(ev, pId, tId) {
+  _tkArraste = { pId, tId };
+  try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', tId); } catch (e) {}
+  setTimeout(() => document.querySelector(`tr[data-tk-linha="${tId}"]`)?.classList.add('tk-arrastando'), 0);
+}
+function tkArrasteFim() {
+  document.querySelectorAll('.tk-arrastando,.tk-alvo-antes,.tk-alvo-depois').forEach(e => e.classList.remove('tk-arrastando','tk-alvo-antes','tk-alvo-depois'));
+  _tkArraste = null;
+  if (typeof _sinc !== 'undefined' && _sinc.pendenteRender) setTimeout(() => { try { _sincRedesenhar(); } catch (e) {} }, 300);
+}
+function tkLadoDoSoltar(ev, tr) { const r = tr.getBoundingClientRect(); return (ev.clientY - r.top) < r.height / 2 ? 'antes' : 'depois'; }
+function tkArrasteSobre(ev, pId, alvoId) {
+  if (!_tkArraste || _tkArraste.pId !== pId || _tkArraste.tId === alvoId) return;
+  const p = state.projetos.find(x => x.id === pId);
+  const mov = p?.tasks?.find(x => x.id === _tkArraste.tId), alvo = p?.tasks?.find(x => x.id === alvoId);
+  if (!mov || !alvo || mov.fase !== alvo.fase) return;   // outra fase: não aceita (cursor de proibido)
+  ev.preventDefault();
+  const tr = ev.currentTarget, lado = tkLadoDoSoltar(ev, tr);
+  tr.classList.toggle('tk-alvo-antes', lado === 'antes');
+  tr.classList.toggle('tk-alvo-depois', lado === 'depois');
+}
+function tkArrasteSai(ev) { ev.currentTarget.classList.remove('tk-alvo-antes', 'tk-alvo-depois'); }
+
+async function tkSoltar(ev, pId, alvoId) {
+  ev.preventDefault();
+  const arr = _tkArraste;
+  const lado = tkLadoDoSoltar(ev, ev.currentTarget);
+  tkArrasteFim();
+  if (!arr || arr.pId !== pId || arr.tId === alvoId) return;
+  const p = state.projetos.find(x => x.id === pId);
+  if (!p || !tkPodeArrastar(p)) return;
+  const mov = p.tasks.find(x => x.id === arr.tId), alvo = p.tasks.find(x => x.id === alvoId);
+  if (!mov || !alvo) return;
+  if (mov.fase !== alvo.fase) { notificar('A tarefa só pode ser movida dentro da mesma fase.', 'erro'); return; }
+
+  const macroAlvo = tkMacroDa(p, alvo), macroAntes = tkMacroDa(p, mov);
+  const trocaMacro = (macroAlvo ? macroAlvo.id : null) !== (macroAntes ? macroAntes.id : null);
+  if (trocaMacro && !macroAlvo) { notificar('Para tirar a tarefa da macro, use os detalhes da tarefa. Arrastando, ela só muda para outra macro.', 'erro'); return; }
+
+  // estado anterior, para desfazer se o servidor recusar
+  const copia = p.tasks.slice(), ordensAntes = p.tasks.map(t => t._ordem);
+  const camposAntes = { macroActivityId: mov.macroActivityId, prazo: mov.prazo, prazoOrigem: mov.prazoOrigem, _prazoManual: mov._prazoManual };
+  const mapsAntes = JSON.parse(JSON.stringify(p.macroMappings || []));
+
+  const de = p.tasks.indexOf(mov);
+  p.tasks.splice(de, 1);
+  const para = p.tasks.indexOf(alvo) + (lado === 'antes' ? 0 : 1);
+  p.tasks.splice(para, 0, mov);
+  const mudadas = tkRenumerar(p, Math.min(de, para), trocaMacro ? mov : null);
+
+  if (trocaMacro) {
+    vincularTarefaAMacro(p, mov, macroAlvo.id);
+    // prazo que seguia a macro antiga passa a seguir a nova; prazo manual e tarefa concluída ficam como estão
+    if (!mov._prazoManual && mov.status !== 'concluida' && macroAlvo.endDate) { mov.prazo = macroAlvo.endDate; mov.prazoOrigem = 'macro'; }
+  }
+  tkRedesenhar(p);
+
+  const ro = await tkGravarOrdem(p, mudadas);
+  let rv = { ok: true };
+  if (ro.ok && trocaMacro) rv = await persistirCronograma(p, [mov]);
+  if (!ro.ok || !rv.ok) {
+    p.tasks = copia; copia.forEach((t, i) => { t._ordem = ordensAntes[i]; });
+    Object.assign(mov, camposAntes); p.macroMappings = mapsAntes;
+    if (!ro.ok) tkGravarOrdem(p, p.tasks.filter((t, i) => i >= Math.min(de, para)));   // tenta devolver as posições
+    tkRedesenhar(p);
+    notificar('Não foi possível mover a tarefa: ' + (ro.ok ? rv.error : ro.error) + ' Nada foi alterado.', 'erro');
+    return;
+  }
+  saveState();
+  notificar(trocaMacro ? `Tarefa movida para a macro "${macroAlvo.name}".` : 'Tarefa movida.', 'sucesso');
 }
 
 // Exclui uma tarefa APENAS deste projeto. O checklist padrão e os demais
