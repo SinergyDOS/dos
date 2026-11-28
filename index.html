@@ -301,6 +301,10 @@ tr:last-child td{border-bottom:none}
   <div class="sidebar-nav" id="sidebar-nav">
     <!-- preenchido por renderSidebar() -->
   </div>
+  <div id="sinc-status" style="display:none;padding:0 16px 10px;font-size:11px;line-height:1.5;color:rgba(255,255,255,.6)">
+    <span id="sinc-texto">—</span>
+    <button class="btn btn-secondary btn-sm" style="width:100%;margin-top:6px" onclick="sincronizarAgora(true)">Atualizar agora</button>
+  </div>
   <div style="padding:16px">
     <button class="btn btn-secondary btn-sm" style="width:100%" onclick="logout()"><i class="ti ti-logout"></i> Sair</button>
   </div>
@@ -1010,7 +1014,7 @@ const DEFAULT_DEPARA_RH_AD = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-11-25-cronograma-pdf';
+const DOS_BUILD = '2026-11-27-atualizacao-automatica';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -1020,6 +1024,15 @@ let sbClient = null;
 try {
   if (window.supabase && typeof window.supabase.createClient === 'function') {
     sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+    // Anota o instante de toda gravação nossa: a atualização automática espera o banco assentar antes de mesclar.
+    const _fromOriginal = sbClient.from.bind(sbClient);
+    sbClient.from = function (tabela) {
+      const q = _fromOriginal(tabela);
+      ['insert', 'update', 'upsert', 'delete'].forEach(m => {
+        if (typeof q[m] === 'function') { const f = q[m].bind(q); q[m] = function () { _sinc.ultimaEscrita = Date.now(); return f.apply(null, arguments); }; }
+      });
+      return q;
+    };
   }
 } catch (e) { sbClient = null; }
 
@@ -1303,13 +1316,19 @@ function loadState() {
 
 function saveState() {
   try {
-    localStorage.setItem('implanta_state', JSON.stringify(state, (k, v) => (k === 'logoCliente' || k === '_logoAlterada') ? undefined : v));
+    // Os projetos vivem no Supabase e o loadState os descarta ao abrir: não vão para o navegador.
+    // (Guardá-los estourava o limite de ~5 milhões de caracteres do localStorage a cada alteração.)
+    localStorage.setItem('implanta_state', JSON.stringify(state, function (k, v) {
+      if (this === state && k === 'projetos') return [];
+      return (k === 'logoCliente' || k === '_logoAlterada') ? undefined : v;
+    }));
     return true;
   } catch(e) {
-    // Cota de armazenamento excedida ou localStorage indisponível
-    if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
-      alert('O armazenamento do navegador está cheio. Alguns dados podem não ter sido salvos. '
-          + 'Considere remover projetos antigos ou usar o navegador em modo normal (não anônimo).');
+    // Cota excedida ou localStorage indisponível. Os dados do sistema (Supabase) não são afetados: só as
+    // preferências locais deixam de ser guardadas. Aviso discreto, uma vez por sessão (sem alert que trava a tela).
+    if (e && (e.name === 'QuotaExceededError' || e.code === 22) && !saveState._avisou) {
+      saveState._avisou = true;
+      notificar('O navegador não conseguiu guardar suas preferências locais (sem espaço). Seus dados no sistema estão salvos.', 'aviso');
     }
     console.error('Falha ao salvar estado:', e);
     return false;
@@ -1636,6 +1655,7 @@ async function carregarProjetosDoSupabase() {
     // Normaliza módulos (mesma regra do loadState local), idempotente
     state.projetos.forEach(p => { try { normalizeProjectModules(p); } catch(e){} });
     _projetosCarregando = false;
+    _sincIniciar({ projRes, taskRes, riskRes, fuRes, wmRes });   // passa a acompanhar as mudanças de outras pessoas
     // Re-renderiza a tela atual com os dados do banco
     if (state.currentPage) nav(state.currentPage); else nav('dashboard');
   } catch (e) {
@@ -1643,6 +1663,242 @@ async function carregarProjetosDoSupabase() {
     _projetosCarregando = false;
     notificar('Erro de conexão ao carregar projetos.', 'erro');
   }
+}
+
+// ==================== ATUALIZAÇÃO AUTOMÁTICA (várias pessoas no mesmo projeto) ====================
+// Consulta o servidor de tempos em tempos e traz só o que mudou desde a última checagem, para quem está em
+// reunião ver o que os colegas alteraram sem recarregar a página. Não exige SQL nem recursos especiais do
+// Supabase: usa o updated_at que as tabelas já têm e as mesmas permissões (RLS) de quem está logado.
+const SINC_INTERVALO_MS = 25000;    // checagem de mudanças (só com a aba visível)
+const SINC_EXCLUSOES_MS = 120000;   // verificação do que outra pessoa excluiu
+const SINC_FOLGA_MS = 15000;        // sobreposição da janela de consulta (a mescla é idempotente)
+const SINC_QUIETO_MS = 6000;        // depois de uma gravação nossa, espera o banco assentar antes de mesclar
+const _SINC_COLUNA = { projects: 'updated_at', tasks: 'updated_at', risks: 'updated_at', follow_ups: 'created_at', weekly_missions: 'updated_at' };
+const _sinc = { timer: null, rodando: false, desde: {}, ultimaOk: null, ultimaEscrita: 0, ultimaExclusoes: 0,
+                ultimaTentativa: 0, pendenteRender: false, falhas: 0, ouvintes: false, retry: null };
+
+function _sincMaxTs(linhas, col) {
+  let m = null;
+  (linhas || []).forEach(r => { const v = r && r[col]; if (v && (!m || v > m)) m = v; });
+  return m;
+}
+// Começa a acompanhar: o ponto de partida vem do próprio servidor (maior updated_at já carregado), não do relógio do computador.
+function _sincIniciar(res) {
+  _sincParar();
+  const por = { projects: res.projRes, tasks: res.taskRes, risks: res.riskRes, follow_ups: res.fuRes, weekly_missions: res.wmRes };
+  Object.keys(_SINC_COLUNA).forEach(t => {
+    const r = por[t];
+    // tabela que não carregou (ex.: ainda não criada) fica fora da sincronização
+    _sinc.desde[t] = (r && !r.error) ? (_sincMaxTs(r.data, _SINC_COLUNA[t]) || '') : undefined;
+  });
+  _sinc.ultimaOk = Date.now(); _sinc.ultimaExclusoes = Date.now(); _sinc.falhas = 0; _sinc.pendenteRender = false;
+  _sinc.timer = setInterval(() => sincronizarAgora(false), SINC_INTERVALO_MS);
+  if (!_sinc.ouvintes) {
+    _sinc.ouvintes = true;
+    const aoVoltar = () => { if (document.visibilityState === 'visible' && Date.now() - _sinc.ultimaTentativa > 5000) sincronizarAgora(false); };
+    document.addEventListener('visibilitychange', aoVoltar);
+    window.addEventListener('focus', aoVoltar);
+  }
+  _sincIndicador();
+}
+function _sincParar() {
+  if (_sinc.timer) clearInterval(_sinc.timer);
+  if (_sinc.retry) clearTimeout(_sinc.retry);
+  _sinc.timer = null; _sinc.retry = null; _sinc.desde = {}; _sinc.rodando = false;
+  _sincIndicador();
+}
+function _sincIndicador(estado) {
+  const el = document.getElementById('sinc-status'); if (!el) return;
+  if (!_sinc.timer) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  const hora = _sinc.ultimaOk ? new Date(_sinc.ultimaOk).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—';
+  document.getElementById('sinc-texto').textContent =
+    estado === 'buscando' ? 'Atualizando…' : _sinc.falhas >= 2 ? 'Sem conexão. Tentando de novo…' : 'Atualizado às ' + hora;
+}
+function _sincAgendar(ms) {
+  if (_sinc.retry) return;
+  _sinc.retry = setTimeout(() => { _sinc.retry = null; sincronizarAgora(false); }, ms + 500);
+}
+function _sincIso(ms, iso) { return new Date(new Date(iso).getTime() - ms).toISOString(); }
+async function _sincBuscar(tabela, desde) {
+  const todas = []; let de = 0;
+  for (;;) {
+    let q = sbClient.from(tabela).select('*');
+    if (desde) q = q.gte(_SINC_COLUNA[tabela], desde);
+    const { data, error } = await q.order('id', { ascending: true }).range(de, de + 999);
+    if (error) throw new Error(tabela + ': ' + error.message);
+    const lote = data || []; todas.push(...lote);
+    if (lote.length < 1000) break;
+    de += 1000; if (de > 200000) break;
+  }
+  return todas;
+}
+async function _sincIds(tabela) {
+  const ids = new Set(); let de = 0;
+  for (;;) {
+    const { data, error } = await sbClient.from(tabela).select('id').order('id', { ascending: true }).range(de, de + 999);
+    if (error) throw new Error(tabela + ': ' + error.message);
+    const lote = data || []; lote.forEach(r => ids.add(r.id));
+    if (lote.length < 1000) break;
+    de += 1000; if (de > 200000) break;
+  }
+  return ids;
+}
+// Igual quando todos os campos que vêm do servidor coincidem (campos só locais são ignorados).
+function _sincIgual(local, novo) { return Object.keys(novo).every(k => JSON.stringify(local[k]) === JSON.stringify(novo[k])); }
+
+const _SINC_CAMPOS_PROJETO = ['nome','cliente','modulos','itensCustomizados','dataInicio','goLive','consultor','analista',
+  'techLead','analistaProjetos','logoCliente','templateId','macroActivities','macroMappings','_demo'];
+// Devolve 'alterado', 'igual' ou 'adiado' (a pessoa está editando as datas deste projeto).
+function _sincAplicarProjeto(p, row) {
+  const n = _mapProjectRow(row, { [row.id]: [] }, { [row.id]: [] });
+  try { normalizeProjectModules(n); } catch (e) {}
+  if (_SINC_CAMPOS_PROJETO.every(k => JSON.stringify(p[k]) === JSON.stringify(n[k]))) return 'igual';
+  if (state.cronoEdicao && state.currentProjetoId === p.id) return 'adiado';
+  _SINC_CAMPOS_PROJETO.forEach(k => { p[k] = n[k]; });
+  return 'alterado';
+}
+// Projeto que apareceu para esta pessoa (novo ou recém-atribuído): traz o projeto inteiro.
+async function _sincCarregarProjeto(row) {
+  const id = row.id;
+  const [tk, rk, fu, wm] = await Promise.all(['tasks', 'risks', 'follow_ups', 'weekly_missions'].map(t =>
+    sbClient.from(t).select('*').eq('project_id', id).order('id', { ascending: true }).range(0, 4999)));
+  if (tk.error || rk.error) throw new Error('projeto ' + id + ': ' + ((tk.error || rk.error).message));
+  const proj = _mapProjectRow(row, { [id]: (tk.data || []).map(_mapTaskRow) }, { [id]: (rk.data || []).map(_mapRiskRow) });
+  proj.followUps = (fu && !fu.error) ? (fu.data || []).map(_mapFollowUpRow) : [];
+  proj.missoes = (wm && !wm.error) ? (wm.data || []).map(_mapMissaoRow) : [];
+  try { normalizeProjectModules(proj); } catch (e) {}
+  state.projetos.push(proj);
+}
+
+async function sincronizarAgora(manual) {
+  if (!sbClient || !state.currentUser || _projetosCarregando || _sinc.rodando || !_sinc.timer) return;
+  if (!manual && document.visibilityState === 'hidden') return;
+  if (_sinc.pendenteRender) _sincRedesenhar();
+  // Gravação nossa muito recente: espera o banco assentar, senão uma resposta atrasada poderia desfazer o que a pessoa acabou de fazer.
+  if (Date.now() - _sinc.ultimaEscrita < SINC_QUIETO_MS) { _sincAgendar(SINC_QUIETO_MS); return; }
+  _sinc.rodando = true; _sinc.ultimaTentativa = Date.now(); _sincIndicador('buscando');
+  try {
+    const tabelas = Object.keys(_SINC_COLUNA).filter(t => _sinc.desde[t] !== undefined);
+    const resp = {};
+    await Promise.all(tabelas.map(async t => { resp[t] = await _sincBuscar(t, _sinc.desde[t] ? _sincIso(SINC_FOLGA_MS, _sinc.desde[t]) : null); }));
+    if (Date.now() - _sinc.ultimaEscrita < SINC_QUIETO_MS) { _sincAgendar(SINC_QUIETO_MS); return; }   // gravamos durante a consulta
+    const r = { porAutor: {}, tarefasAlteradas: 0, tarefasSemAutor: 0, tarefasNovas: 0, riscos: 0, followUps: 0, missoes: 0, projetosNovos: 0, projetosAlterados: 0, removidos: 0, projetosRemovidos: [] };
+    const meuNome = state.currentUser.name;
+    const local = id => state.projetos.find(x => x.id === id);
+    let adiouProjeto = false;
+
+    // 1) projetos: alterados e os que apareceram para esta pessoa
+    const novos = new Map();
+    (resp.projects || []).forEach(row => {
+      const p = local(row.id);
+      if (!p) { novos.set(row.id, row); return; }
+      const s = _sincAplicarProjeto(p, row);
+      if (s === 'alterado') r.projetosAlterados++; else if (s === 'adiado') adiouProjeto = true;
+    });
+    // projeto que aparece só nas tarefas/riscos/etc. (ex.: pessoa recém-incluída como consultora)
+    const faltantes = new Set();
+    ['tasks', 'risks', 'follow_ups', 'weekly_missions'].forEach(t => (resp[t] || []).forEach(x => { if (!local(x.project_id) && !novos.has(x.project_id)) faltantes.add(x.project_id); }));
+    if (faltantes.size) {
+      const { data, error } = await sbClient.from('projects').select('*').in('id', [...faltantes]);
+      if (error) throw new Error('projects: ' + error.message);
+      (data || []).forEach(row => novos.set(row.id, row));
+    }
+    for (const row of novos.values()) { await _sincCarregarProjeto(row); r.projetosNovos++; }
+
+    // 2) tarefas
+    const reordenar = new Set();
+    (resp.tasks || []).forEach(row => {
+      if (novos.has(row.project_id)) return;
+      const p = local(row.project_id); if (!p) return;
+      const nova = _mapTaskRow(row); const i = p.tasks.findIndex(t => t.id === nova.id);
+      if (i < 0) { p.tasks.push(nova); reordenar.add(p); r.tarefasNovas++; return; }
+      if (_sincIgual(p.tasks[i], nova)) return;
+      Object.assign(p.tasks[i], nova);
+      r.tarefasAlteradas++;
+      if (!row.alterado_por) r.tarefasSemAutor++;
+      else if (row.alterado_por !== meuNome) r.porAutor[row.alterado_por] = (r.porAutor[row.alterado_por] || 0) + 1;
+    });
+    reordenar.forEach(p => p.tasks.sort((a, b) => (a._ordem ?? 0) - (b._ordem ?? 0)));
+
+    // 3) riscos, follow-ups e missões
+    const mescla = (lista, novo) => { const i = lista.findIndex(x => x.id === novo.id); if (i < 0) { lista.push(novo); return true; } if (_sincIgual(lista[i], novo)) return false; Object.assign(lista[i], novo); return true; };
+    (resp.risks || []).forEach(row => { const p = !novos.has(row.project_id) && local(row.project_id); if (p && mescla(p.risks = p.risks || [], _mapRiskRow(row))) r.riscos++; });
+    (resp.follow_ups || []).forEach(row => { const p = !novos.has(row.project_id) && local(row.project_id); if (p && mescla(p.followUps = p.followUps || [], _mapFollowUpRow(row))) r.followUps++; });
+    (resp.weekly_missions || []).forEach(row => { const p = !novos.has(row.project_id) && local(row.project_id); if (p && mescla(p.missoes = p.missoes || [], _mapMissaoRow(row))) r.missoes++; });
+
+    // 4) exclusões feitas por outra pessoa (a cada 2 minutos; nunca logo depois de uma gravação nossa)
+    if (Date.now() - _sinc.ultimaExclusoes >= SINC_EXCLUSOES_MS && Date.now() - _sinc.ultimaEscrita >= SINC_QUIETO_MS) {
+      await _sincExclusoes(r); _sinc.ultimaExclusoes = Date.now();
+    }
+    // avança o ponto de partida só depois de tudo aplicado (o que foi adiado é consultado de novo)
+    tabelas.forEach(t => { if (t === 'projects' && adiouProjeto) return; const m = _sincMaxTs(resp[t], _SINC_COLUNA[t]); if (m && (!_sinc.desde[t] || m > _sinc.desde[t])) _sinc.desde[t] = m; });
+
+    const mudou = r.tarefasAlteradas || r.tarefasNovas || r.riscos || r.followUps || r.missoes || r.projetosNovos || r.projetosAlterados || r.removidos;
+    if (mudou) { _sincAvisar(r); _sincRedesenhar(); }
+    _sinc.ultimaOk = Date.now(); _sinc.falhas = 0;
+  } catch (e) {
+    _sinc.falhas++; console.warn('Atualização automática:', (e && e.message) || e);
+    if (_sinc.falhas === 3) notificar('Sem conexão com o servidor. A atualização automática tenta de novo sozinha.', 'aviso');
+  } finally { _sinc.rodando = false; _sincIndicador(); }
+}
+async function _sincExclusoes(r) {
+  const quais = ['projects', 'tasks', 'risks', 'follow_ups', 'weekly_missions'].filter(t => _sinc.desde[t] !== undefined);
+  const ids = {};
+  await Promise.all(quais.map(async t => { ids[t] = await _sincIds(t); }));
+  if (ids.projects && ids.projects.size === 0 && state.projetos.length > 0) return;   // resposta vazia é suspeita: não apaga nada
+  if (ids.projects) {
+    const sumiram = state.projetos.filter(p => !ids.projects.has(p.id));
+    sumiram.forEach(p => { r.removidos++; r.projetosRemovidos.push(p.nome); });
+    if (sumiram.length) state.projetos = state.projetos.filter(p => ids.projects.has(p.id));
+  }
+  const filtra = (lista, set) => { const antes = lista.length; const resto = lista.filter(x => set.has(x.id)); r.removidos += antes - resto.length; return resto; };
+  state.projetos.forEach(p => {
+    if (ids.tasks) p.tasks = filtra(p.tasks || [], ids.tasks);
+    if (ids.risks) p.risks = filtra(p.risks || [], ids.risks);
+    if (ids.follow_ups) p.followUps = filtra(p.followUps || [], ids.follow_ups);
+    if (ids.weekly_missions) p.missoes = filtra(p.missoes || [], ids.weekly_missions);
+  });
+}
+
+function _sincAvisar(r) {
+  const p = [];
+  Object.entries(r.porAutor).forEach(([quem, n]) => p.push(quem + ' atualizou ' + n + (n === 1 ? ' tarefa' : ' tarefas')));
+  if (r.tarefasSemAutor) p.push(r.tarefasSemAutor + (r.tarefasSemAutor === 1 ? ' tarefa atualizada' : ' tarefas atualizadas'));
+  if (r.tarefasNovas) p.push(r.tarefasNovas + (r.tarefasNovas === 1 ? ' tarefa nova' : ' tarefas novas'));
+  if (r.projetosNovos) p.push(r.projetosNovos + (r.projetosNovos === 1 ? ' projeto novo' : ' projetos novos'));
+  if (r.projetosAlterados) p.push(r.projetosAlterados + (r.projetosAlterados === 1 ? ' projeto alterado' : ' projetos alterados'));
+  if (r.riscos) p.push(r.riscos + (r.riscos === 1 ? ' risco' : ' riscos'));
+  if (r.followUps) p.push(r.followUps + (r.followUps === 1 ? ' follow-up' : ' follow-ups'));
+  if (r.missoes) p.push(r.missoes + (r.missoes === 1 ? ' missão' : ' missões'));
+  if (r.projetosRemovidos.length) p.push('removido: ' + r.projetosRemovidos.join(', '));
+  else if (r.removidos) p.push(r.removidos + (r.removidos === 1 ? ' item removido' : ' itens removidos'));
+  if (p.length) notificar('Atualizado: ' + p.join(' · '), 'info');
+}
+
+// Redesenha a tela atual com os dados novos, sem jogar a pessoa para o topo. Não redesenha se ela estiver
+// no meio de algo (janela aberta, "Editar prazos", edição de datas ou digitando): deixa pendente e tenta de novo.
+function _sincRedesenhar() {
+  const modal = document.getElementById('modal-overlay');
+  const a = document.activeElement;
+  const digitando = !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(a.type))) && !!a.closest && !!a.closest('#page-content');
+  if ((modal && !modal.classList.contains('hidden')) || state.listaEdicaoPrazos || state.cronoEdicao || digitando) { _sinc.pendenteRender = true; return false; }
+  _sinc.pendenteRender = false;
+  const rolagem = []; let n = document.getElementById('page-content');
+  while (n) { if (n.scrollTop > 0) rolagem.push([n, n.scrollTop]); n = n.parentElement; }
+  const y = window.scrollY || 0;
+  renderSidebar();
+  document.getElementById('nav-' + state.currentPage)?.classList.add('active');
+  // O portal não marca a tela do projeto como página própria: ele está na tela quando existe o #task-view.
+  if (document.getElementById('task-view') && state.currentProjetoId) {
+    const p = state.projetos.find(x => x.id === state.currentProjetoId);
+    if (p) renderProjetoDetail(p); else { state.currentProjetoId = null; nav('projetos'); }
+  } else if (['dashboard', 'projetos', 'meu-dia', 'minhas-tarefas', 'matriz-alocacao'].includes(state.currentPage)) {
+    nav(state.currentPage);
+  }
+  rolagem.forEach(([el, topo]) => { el.scrollTop = topo; });
+  if (y) window.scrollTo(0, y);
+  return true;
 }
 
 // ==================== FASE 3 — ESCRITA DE PROJETOS (Supabase) ====================
@@ -1976,6 +2232,7 @@ async function logout() {
   state.mtExpandMacro = {};
   state._mtInit = false;
   try { if (sbClient) await sbClient.auth.signOut(); } catch (e) {}
+  _sincParar();
   state.currentUser = null;
   document.getElementById('user-select-screen').classList.remove('hidden');
   document.getElementById('main').classList.add('hidden');
@@ -7327,7 +7584,7 @@ function ordemDasTarefas(p) {
 // Ordena tarefas: 1) macroOrder; 2) sequência do checklist; 3) prazo; 4) nome.
 // (O item 2 constava no comentário mas não estava implementado: sem ele, as tarefas de uma macro, que
 // herdam o mesmo prazo, caíam em ordem alfabética.)
-function sortHierarchyTasks(tasks, ordem) {
+function sortHierarchyTasks(tasks, ordem, porPrazo) {
   const modo = state.ordenacaoLista || 'padrao';
   if (modo === 'vencimento') {
     // Ordena por prazo (mais próximo primeiro); tarefas sem prazo ao final; concluídas ao fim.
@@ -7342,6 +7599,12 @@ function sortHierarchyTasks(tasks, ordem) {
   // padrão: macroOrder → ordem do projeto → prazo → nome
   return [...tasks].sort((a,b) => {
     if (a.macroOrder != null && b.macroOrder != null && a.macroOrder !== b.macroOrder) return a.macroOrder - b.macroOrder;
+    // Projeto sem cronograma macro (ex.: Customização): não há macros que deem ordem às tarefas incluídas depois.
+    // Vale o prazo (mais próximo primeiro); as sem prazo seguem a sequência do checklist, depois das datadas.
+    if (porPrazo) {
+      const pa = a.prazo || '', pb = b.prazo || '';
+      if (pa !== pb) { if (!pa) return 1; if (!pb) return -1; return pa < pb ? -1 : 1; }
+    }
     if (ordem) {
       const ia = ordem.get(a.id), ib = ordem.get(b.id);
       if (ia != null && ib != null && ia !== ib) return ia - ib;
@@ -7402,7 +7665,7 @@ function groupProjectTasksHierarchy(project, tasks) {
       phaseKey: fase, phaseName: fase,
       totals: { macroDeliveries: macroDeliveries.length, tasks: allFaseTasks.length, completed, overdue, blocked, progress },
       macroDeliveries,
-      unmappedTasks: sortHierarchyTasks(unmapped, ordem)
+      unmappedTasks: sortHierarchyTasks(unmapped, ordem, !projetoTemMacro(project))
     };
   });
 }
@@ -7487,8 +7750,8 @@ function renderLista(tasks, p, container) {
       <div style="display:flex;align-items:center;gap:8px">
         <span style="font-size:12px;color:var(--gray-500)"><i class="ti ti-arrows-sort" style="font-size:13px;vertical-align:-1px"></i> Ordenar por:</span>
         <select class="filter-select" onchange="state.ordenacaoLista=this.value;renderTaskView(state.projetos.find(x=>x.id==='${p.id}'))">
-          <option value="padrao" ${(state.ordenacaoLista||'padrao')==='padrao'?'selected':''}>Ordem do cronograma</option>
-          <option value="vencimento" ${state.ordenacaoLista==='vencimento'?'selected':''}>Data de vencimento (mais próximo primeiro)</option>
+          <option value="padrao" ${(state.ordenacaoLista||'padrao')==='padrao'?'selected':''}>${projetoTemMacro(p) ? 'Ordem do cronograma' : 'Por prazo (concluídas ficam no lugar)'}</option>
+          <option value="vencimento" ${state.ordenacaoLista==='vencimento'?'selected':''}>${projetoTemMacro(p) ? 'Data de vencimento (mais próximo primeiro)' : 'Por prazo, concluídas por último'}</option>
         </select>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -7873,6 +8136,21 @@ function changeMonth(delta) {
 }
 
 // ==================== TASK ACTIONS ====================
+// Redesenha a tela de origem depois de mudar o status de uma tarefa na Lista do projeto, para o texto riscado,
+// o selo de status e os contadores da fase aparecerem na hora (antes só apareciam ao recarregar a página).
+// Guarda e restaura a rolagem para não voltar ao topo da lista a cada clique. Em "Editar prazos" não redesenha,
+// para não descartar datas digitadas e ainda não salvas.
+function redesenharAposStatus(p) {
+  if (state.listaEdicaoPrazos) return;
+  const rolagem = []; let n = document.getElementById('page-content');
+  while (n) { if (n.scrollTop > 0) rolagem.push([n, n.scrollTop]); n = n.parentElement; }
+  const y = window.scrollY || 0;
+  if (state.currentPage === 'minhas-tarefas') renderMinhasTarefas();
+  else if (p) renderProjetoDetail(p);
+  rolagem.forEach(([el, topo]) => { el.scrollTop = topo; });
+  if (y) window.scrollTo(0, y);
+}
+
 function toggleTask(pId, tId, checked) {
   const p = state.projetos.find(x=>x.id===pId);
   const t = p?.tasks?.find(x=>x.id===tId);
@@ -7882,6 +8160,7 @@ function toggleTask(pId, tId, checked) {
     persistirTarefa(pId, t);
     renderSidebar();
     document.getElementById('nav-'+state.currentPage)?.classList.add('active');
+    redesenharAposStatus(p);
   }
 }
 
@@ -7894,6 +8173,7 @@ function mudarStatus(pId, tId, status) {
     persistirTarefa(pId, t);
     renderSidebar();
     document.getElementById('nav-'+state.currentPage)?.classList.add('active');
+    redesenharAposStatus(p);
   }
 }
 
@@ -8855,7 +9135,7 @@ function renderMinhasTarefasHierarquia(tabsHTML) {
               <div style="flex:1;font-size:12px;font-weight:600;color:#92400e">Sem macro entrega vinculada</div>
               <span class="badge badge-warn" style="font-size:9px">${g.unmappedTasks.length}</span>
             </div>
-            ${ab?`<div style="display:flex;flex-direction:column;gap:7px;padding:8px 10px 10px 20px">${sortHierarchyTasks(g.unmappedTasks, ordemDasTarefas(projeto)).map(t=>tarefaCardHTML(t)).join('')}</div>`:''}
+            ${ab?`<div style="display:flex;flex-direction:column;gap:7px;padding:8px 10px 10px 20px">${sortHierarchyTasks(g.unmappedTasks, ordemDasTarefas(projeto), !projetoTemMacro(projeto)).map(t=>tarefaCardHTML(t)).join('')}</div>`:''}
           </div>`;
         })() : '';
         corpo = macros + unmapped;
