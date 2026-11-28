@@ -1014,7 +1014,7 @@ const DEFAULT_DEPARA_RH_AD = [
 // nesta etapa; a sincronização com o Supabase é a Fase 3.
 // Marcador de build: permite confirmar qual versão está publicada.
 // Aparece no console ao abrir e em window.DOS_BUILD.
-const DOS_BUILD = '2026-11-27-atualizacao-automatica';
+const DOS_BUILD = '2026-11-28-ordenar-por-customizacao';
 try { console.log('%cDOS build: ' + DOS_BUILD, 'color:#2e6ef7;font-weight:bold'); } catch(e) {}
 window.DOS_BUILD = DOS_BUILD;
 
@@ -5319,6 +5319,9 @@ async function executarTrocaChecklist(pId) {
 // Projetos pequenos (ex.: Customização) não usam atividades macro: as tarefas ficam
 // direto na fase e não há datas de macro para editar.
 function projetoTemMacro(p) { return Array.isArray(p?.macroActivities) && p.macroActivities.length > 0; }
+// Cronograma macro que de fato dá ordem às tarefas: ao menos uma macro com data. Projetos de Customização nascem do
+// template com uma macro por fase e sem datas; para a Lista e o "Ordenar por" eles valem como projeto sem cronograma.
+function projetoTemCronogramaDatado(p) { return projetoTemMacro(p) && p.macroActivities.some(m => m && (m.startDate || m.endDate)); }
 
 // Tarefas listadas direto na fase, sem a camada de macro entrega
 function renderTarefasDiretas(p, tasks) {
@@ -7650,7 +7653,7 @@ function groupProjectTasksHierarchy(project, tasks) {
     let macroDeliveries = [...byDelivery.values()].map(entry => {
       const prog = calculateMacroDeliveryProgress(project, entry.macroActivity, entry.tasks);
       const status = determineMacroDeliveryStatus(entry.macroActivity, entry.mapping, prog);
-      return { macroActivity: entry.macroActivity, mapping: entry.mapping, status, progress: prog, posChecklist: posMacro.get(entry.chave), tasks: sortHierarchyTasks(entry.tasks, ordem) };
+      return { macroActivity: entry.macroActivity, mapping: entry.mapping, status, progress: prog, posChecklist: posMacro.get(entry.chave), tasks: sortHierarchyTasks(entry.tasks, ordem, !projetoTemCronogramaDatado(project)) };
     });
     macroDeliveries = sortMacroDeliveries(macroDeliveries);
 
@@ -7665,7 +7668,7 @@ function groupProjectTasksHierarchy(project, tasks) {
       phaseKey: fase, phaseName: fase,
       totals: { macroDeliveries: macroDeliveries.length, tasks: allFaseTasks.length, completed, overdue, blocked, progress },
       macroDeliveries,
-      unmappedTasks: sortHierarchyTasks(unmapped, ordem, !projetoTemMacro(project))
+      unmappedTasks: sortHierarchyTasks(unmapped, ordem, !projetoTemCronogramaDatado(project))
     };
   });
 }
@@ -7750,8 +7753,8 @@ function renderLista(tasks, p, container) {
       <div style="display:flex;align-items:center;gap:8px">
         <span style="font-size:12px;color:var(--gray-500)"><i class="ti ti-arrows-sort" style="font-size:13px;vertical-align:-1px"></i> Ordenar por:</span>
         <select class="filter-select" onchange="state.ordenacaoLista=this.value;renderTaskView(state.projetos.find(x=>x.id==='${p.id}'))">
-          <option value="padrao" ${(state.ordenacaoLista||'padrao')==='padrao'?'selected':''}>${projetoTemMacro(p) ? 'Ordem do cronograma' : 'Por prazo (concluídas ficam no lugar)'}</option>
-          <option value="vencimento" ${state.ordenacaoLista==='vencimento'?'selected':''}>${projetoTemMacro(p) ? 'Data de vencimento (mais próximo primeiro)' : 'Por prazo, concluídas por último'}</option>
+          <option value="padrao" ${(state.ordenacaoLista||'padrao')==='padrao'?'selected':''}>${projetoTemCronogramaDatado(p) ? 'Ordem do cronograma' : 'Por prazo (concluídas ficam no lugar)'}</option>
+          <option value="vencimento" ${state.ordenacaoLista==='vencimento'?'selected':''}>${projetoTemCronogramaDatado(p) ? 'Data de vencimento (mais próximo primeiro)' : 'Por prazo, concluídas por último'}</option>
         </select>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
